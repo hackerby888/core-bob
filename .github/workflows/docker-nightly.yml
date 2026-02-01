@@ -27,4 +27,5 @@ jobs:
           context: .
           file: docker/Dockerfile
           push: true
+          provenance: false
           tags: qubiccore/bob:nightly

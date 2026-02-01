@@ -55,6 +55,7 @@ jobs:
           context: .
           file: docker/Dockerfile
           push: true
+          provenance: false
           tags: |
             qubiccore/bob:latest
             qubiccore/bob:${{ github.ref_name }}
