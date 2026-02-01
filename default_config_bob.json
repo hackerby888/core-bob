@@ -1,0 +1,16 @@
+{
+  "request-cycle-ms": 100,
+  "request-logging-cycle-ms": 30,
+  "future-offset": 3,
+  "log-level": "info",
+  "keydb-url": "tcp://127.0.0.1:6379",
+  "run-server": false,
+  "server-port": 21842,
+  "arbitrator-identity": "AFZPUAIYVPNUYGJRQVLUKOPPVLHAZQTGLYAAUUNBXFTVTAMSBKQBLEIEPCVJ",
+  "tick-storage-mode": "kvrocks",
+  "kvrocks-url": "tcp://127.0.0.1:6666",
+  "tx-storage-mode" : "kvrocks",
+  "tx_tick_to_live" : 3000,
+  "max-thread": 8,
+  "spam-qu-threshold": 100
+}
