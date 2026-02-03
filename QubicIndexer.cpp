@@ -284,7 +284,7 @@ static void indexTick(uint32_t tick, const TickData &td) {
     db_insert_u32("lastIndexedTick:"+std::to_string(gCurrentProcessingEpoch), tick);
 }
 
-void indexVerifiedTicks(std::atomic_bool& stopFlag)
+void indexVerifiedTicks()
 {
     using namespace std::chrono_literals;
 
@@ -297,7 +297,7 @@ void indexVerifiedTicks(std::atomic_bool& stopFlag)
     gCurrentIndexingTick = lastIndexed;
     Logger::get()->info("QubicIndexer: starting at last_indexed_tick={}", lastIndexed);
 
-    while (!stopFlag.load(std::memory_order_relaxed))
+    while (!gStopFlag.load(std::memory_order_relaxed))
     {
         // Check for reindex signal from admin API
         long long reindexTick = gReindexFromTick.exchange(-1, std::memory_order_acq_rel);
@@ -317,12 +317,12 @@ void indexVerifiedTicks(std::atomic_bool& stopFlag)
             Logger::get()->info("Finish indexing last tick. Exiting...");
             break;
         }
-        if (nextTick >= gCurrentVerifyLoggingTick && !stopFlag.load(std::memory_order_relaxed))
+        if (nextTick >= gCurrentVerifyLoggingTick && !gStopFlag.load(std::memory_order_relaxed))
         {
             SLEEP(10);
             continue;
         }
-        if (stopFlag.load(std::memory_order_relaxed)) break;
+        if (gStopFlag.load(std::memory_order_relaxed)) break;
 
         // Only proceed when the verified-compressed record exists.
         TickData td;

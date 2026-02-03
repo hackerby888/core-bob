@@ -126,13 +126,13 @@ bool verifyQuorum(uint32_t tick, TickData& td, std::vector<TickVote>& votes)
 
 // Requester thread: periodically evaluates what to request next and sends requests over the connection.
 // Placeholders (TODO) are included where the request conditions and payloads will be implemented.
-void IORequestThread(ConnectionPool& conn_pool, std::atomic_bool& stopFlag, std::chrono::milliseconds requestCycle, uint32_t futureOffset)
+void IORequestThread(ConnectionPool& conn_pool, std::chrono::milliseconds requestCycle, uint32_t futureOffset)
 {
     // Optional: pacing/tuning knobs
     auto idleBackoff = 10ms;   // Backoff when there's nothing immediate to request
     const auto errorBackoff = 2000ms; // Backoff after an exception
     auto requestClock = std::chrono::high_resolution_clock::now() - requestCycle;
-    while (!stopFlag.load(std::memory_order_relaxed)) {
+    while (!gStopFlag.load(std::memory_order_relaxed)) {
         if (gIsEndEpoch) break;
 
         try {
@@ -233,14 +233,14 @@ void IORequestThread(ConnectionPool& conn_pool, std::atomic_bool& stopFlag, std:
 }
 
 // this pre-verify tick votes, not fully verifying all digests
-void IOVerifyThread(std::atomic_bool& stopFlag)
+void IOVerifyThread()
 {
     const auto idleBackoff = 10ms;
     TickData td{};
     std::vector<TickVote> votes;
     votes.resize(676);
     memset((void*)votes.data(), 0, votes.size() * sizeof(TickVote));
-    while (!stopFlag.load())
+    while (!gStopFlag.load())
     {
         if (gIsEndEpoch) break;
         if (!verifyQuorum(gCurrentFetchingTick, td, votes))
@@ -291,7 +291,7 @@ static bool isDataType(int type)
 
 
 // Receiver thread: continuously receives full packets and enqueues them into the global round buffer (MRB).
-void connReceiver(QCPtr conn, const bool isTrustedNode, std::atomic_bool& stopFlag)
+void connReceiver(QCPtr conn, const bool isTrustedNode)
 {
     using namespace std::chrono_literals;
 
@@ -299,7 +299,7 @@ void connReceiver(QCPtr conn, const bool isTrustedNode, std::atomic_bool& stopFl
 
     std::vector<uint8_t> packet;
     packet.reserve(64 * 1024); // Optional: initial capacity to minimize reallocations
-    while (!stopFlag.load(std::memory_order_relaxed)) {
+    while (!gStopFlag.load(std::memory_order_relaxed)) {
         try {
             // Blocking receive of a complete packet from the connection.
             RequestResponseHeader hdr{};

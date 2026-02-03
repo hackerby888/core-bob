@@ -84,6 +84,8 @@ struct GlobalState {
     uint64_t startTimeUnix = 0;
 
     bool allowCheckInQubicGlobal = true;
+
+    std::atomic_bool gStopFlag;
 };
 
 // Safe, lazy singleton accessor avoids static init order issues.

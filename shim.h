@@ -55,5 +55,6 @@
 #define gEnableAdminEndpoints (GS().gEnableAdminEndpoints)
 #define gAllowReceiveLogFromIncomingConnection (GS().gAllowReceiveLogFromIncomingConnection)
 #define gExitDataThreadCounter (GS().gExitDataThreadCounter)
+#define gStopFlag (GS().gStopFlag)
 #define gStartTimeUnix (GS().startTimeUnix)
 #define gAllowCheckInQubicGlobal (GS().allowCheckInQubicGlobal)

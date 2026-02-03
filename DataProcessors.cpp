@@ -193,12 +193,12 @@ void recordSmartContractResponse(uint32_t size, uint32_t dejavu, const uint8_t* 
     responseSCData.add(dejavu, ptr, size, nullptr);
 }
 
-void DataProcessorThread(std::atomic_bool& exitFlag)
+void DataProcessorThread()
 {
     std::vector<uint8_t> buf;
     buf.resize(RequestResponseHeader::max_size, 0);
     // Always write the packet to the start of the buffer
-    while (!exitFlag.load())
+    while (!gStopFlag.load())
     {
         uint32_t packet_size = 0;
         if (!MRB_Data.TryGetPacket(buf.data(), packet_size))
@@ -465,12 +465,12 @@ void replyCurrentTickInfo(QCPtr& conn, uint32_t dejavu, uint8_t* ptr)
 }
 
 
-void RequestProcessorThread(std::atomic_bool& exitFlag)
+void RequestProcessorThread()
 {
     std::vector<uint8_t> buf;
     buf.resize(RequestResponseHeader::max_size, 0);
     uint8_t* ptr = buf.data();
-    while (!exitFlag.load())
+    while (!gStopFlag.load())
     {
         uint32_t packet_size = 0;
         if (!MRB_Request.TryGetPacket(buf.data(), packet_size))

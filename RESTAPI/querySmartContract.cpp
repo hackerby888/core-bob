@@ -2,12 +2,12 @@
 #include "connection/connection.h"
 #include "shim.h"
 
-void querySmartContractThread(ConnectionPool& connPoolAll, std::atomic_bool& stopFlag)
+void querySmartContractThread(ConnectionPool& connPoolAll)
 {
     std::vector<uint8_t> buffer;
     buffer.reserve(0xffffff);
     uint32_t size = 0;
-    while (!stopFlag.load())
+    while (!gStopFlag.load())
     {
         buffer.resize(0xffffff);
         if (MRB_SC.TryGetPacket(buffer.data(), size))
