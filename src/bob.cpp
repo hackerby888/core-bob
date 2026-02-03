@@ -16,21 +16,20 @@
 #include <limits>    // std::numeric_limits
 #include <pthread.h> // thread naming on POSIX
 #include <random>    // std::random_device, std::mt19937
-void TickingVerifyThread();
-void TickingDataRequestThread(ConnectionPool& conn_pool, std::chrono::milliseconds requestCycle, uint32_t futureOffset);
-void EventRequestFromTrustedNode(ConnectionPool& connPoolWithPwd, std::chrono::milliseconds request_logging_cycle_ms);
+
+void tickingVerifyThread();
+void tickingDataRequestThread(ConnectionPool& conn_pool, std::chrono::milliseconds requestCycle, uint32_t futureOffset);
+void eventRequestFromTrustedNode(ConnectionPool& connPoolWithPwd, std::chrono::milliseconds request_logging_cycle_ms);
 void connReceiver(QCPtr conn, const bool isTrustedNode);
-void DataProcessorThread();
-void RequestProcessorThread();
+void dataProcessorThread();
+void requestProcessorThread();
 void verifyLoggingEvent();
 void indexVerifiedTicks();
 void querySmartContractThread(ConnectionPool& connPoolAll);
 // Public helpers from QubicServer.cpp
-bool StartQubicServer(ConnectionPool* cp, uint16_t port = 21842);
-void StopQubicServer();
+bool startQubicServer(ConnectionPool* cp, uint16_t port = 21842);
+void stopQubicServer();
 void garbageCleaner();
-
-
 
 static inline void set_this_thread_name(const char* name_in) {
     // Linux allows up to 16 bytes including null terminator
@@ -108,7 +107,6 @@ int runBob(int argc, char *argv[])
     // Put redis_url in REDIS_CONNECTION_STRING
     std::string KEYDB_CONNECTION_STRING = cfg.keydb_url;
 
-
     // Read server flags
     const bool run_server = cfg.run_server;
     unsigned int server_port_u = cfg.server_port;
@@ -150,13 +148,12 @@ int runBob(int argc, char *argv[])
             return -1;
         }
         const uint16_t server_port = static_cast<uint16_t>(server_port_u);
-        if (!StartQubicServer(&connPool, server_port)) {
+        if (!startQubicServer(&connPool, server_port)) {
             Logger::get()->critical("Failed to start embedded server on port {}", server_port);
             return -1;
         }
         Logger::get()->info("Embedded server enabled on port {}", server_port);
     }
-
 
     uint32_t initTick = 0;
     uint16_t initEpoch = 0;
@@ -206,11 +203,10 @@ int runBob(int argc, char *argv[])
         }
     }
 
-
     auto request_thread = std::thread(
             [&](){
                 set_this_thread_name("io-req");
-                TickingDataRequestThread(
+                tickingDataRequestThread(
                         std::ref(connPool),
                         std::chrono::milliseconds(request_cycle_ms),
                         static_cast<uint32_t>(future_offset)
@@ -219,11 +215,11 @@ int runBob(int argc, char *argv[])
     );
     auto verify_thread = std::thread([&](){
         set_this_thread_name("verify");
-        TickingVerifyThread();
+        tickingVerifyThread();
     });
     auto log_request_trusted_nodes_thread = std::thread([&](){
         set_this_thread_name("trusted-log-req");
-        EventRequestFromTrustedNode(std::ref(connPool),
+        eventRequestFromTrustedNode(std::ref(connPool),
                                     std::chrono::milliseconds(request_logging_cycle_ms));
     });
     auto indexer_thread = std::thread([&](){
@@ -263,13 +259,13 @@ int runBob(int argc, char *argv[])
     {
         v_data_thread.emplace_back([&](){
             set_this_thread_name("data");
-            DataProcessorThread();
+            dataProcessorThread();
         });
         v_data_thread.emplace_back([&, i](){
             char nm[16];
             std::snprintf(nm, sizeof(nm), "reqp-%d", i);
             set_this_thread_name(nm);
-            RequestProcessorThread();
+            requestProcessorThread();
         });
     }
     std::thread log_event_verifier_thread;
@@ -403,7 +399,7 @@ int runBob(int argc, char *argv[])
 
     if (run_server)
     {
-        StopQubicServer();
+        stopQubicServer();
         Logger::get()->info("Closed Qubic server at port 21842");
     }
 

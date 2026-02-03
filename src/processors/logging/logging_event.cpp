@@ -785,7 +785,7 @@ verifyNodeStateDigest:
 }
 
 // The logging fetcher thread from trusted nodes only (no signature require)
-void EventRequestFromTrustedNode(ConnectionPool& connPoolWithPwd,
+void eventRequestFromTrustedNode(ConnectionPool& connPoolWithPwd,
                                  std::chrono::milliseconds request_logging_cycle_ms)
 {
     auto idleBackoff = request_logging_cycle_ms;

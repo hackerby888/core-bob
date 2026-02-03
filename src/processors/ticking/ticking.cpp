@@ -126,7 +126,7 @@ bool verifyQuorum(uint32_t tick, TickData& td, std::vector<TickVote>& votes)
 
 // Requester thread: periodically evaluates what to request next and sends requests over the connection.
 // Placeholders (TODO) are included where the request conditions and payloads will be implemented.
-void TickingDataRequestThread(ConnectionPool& conn_pool, std::chrono::milliseconds requestCycle, uint32_t futureOffset)
+void tickingDataRequestThread(ConnectionPool& conn_pool, std::chrono::milliseconds requestCycle, uint32_t futureOffset)
 {
     // Optional: pacing/tuning knobs
     auto idleBackoff = 10ms;   // Backoff when there's nothing immediate to request
@@ -233,7 +233,7 @@ void TickingDataRequestThread(ConnectionPool& conn_pool, std::chrono::millisecon
 }
 
 // this pre-verify tick votes, not fully verifying all digests
-void TickingVerifyThread()
+void tickingVerifyThread()
 {
     const auto idleBackoff = 10ms;
     TickData td{};

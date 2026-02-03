@@ -181,7 +181,7 @@ void recordSmartContractResponse(uint32_t size, uint32_t dejavu, const uint8_t* 
     responseSCData.add(dejavu, ptr, size, nullptr);
 }
 
-void DataProcessorThread()
+void dataProcessorThread()
 {
     std::vector<uint8_t> buf;
     buf.resize(RequestResponseHeader::max_size, 0);
@@ -453,7 +453,7 @@ void replyCurrentTickInfo(QCPtr& conn, uint32_t dejavu, uint8_t* ptr)
 }
 
 
-void RequestProcessorThread()
+void requestProcessorThread()
 {
     std::vector<uint8_t> buf;
     buf.resize(RequestResponseHeader::max_size, 0);

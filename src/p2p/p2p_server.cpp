@@ -383,13 +383,13 @@ namespace {
 } // namespace
 
 // Public helpers to control the server
-bool StartQubicServer(ConnectionPool* cp, uint16_t port = 21842)
+bool startQubicServer(ConnectionPool* cp, uint16_t port = 21842)
 {
     QubicServer::instance().setConnectionPool(cp);
     return QubicServer::instance().start(port, 64, 5);  // 64 global, 5 per IP
 }
 
-void StopQubicServer() {
+void stopQubicServer() {
     QubicServer::instance().stop();
     Logger::get()->info("Stop qubic server");
 }
