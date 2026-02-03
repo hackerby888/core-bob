@@ -376,7 +376,7 @@ static bool checkLogExistAndVerify(uint16_t epoch, long long logId)
     return true;
 }
 
-void verifyLoggingEvent(std::atomic_bool& stopFlag)
+void verifyLoggingEvent()
 {
     gIsEndEpoch = false;
     bool saveLastTick = false;
@@ -435,13 +435,13 @@ void verifyLoggingEvent(std::atomic_bool& stopFlag)
     futUniverse.get();
 
     while (gCurrentFetchingLogTick == gInitialTick) {
-        if (stopFlag.load()) return;
+        if (gStopFlag.load()) return;
         SLEEP(100);
     }
-    while (!stopFlag.load())
+    while (!gStopFlag.load())
     {
-        while (gCurrentVerifyLoggingTick > (gCurrentFetchingLogTick - 1) && !stopFlag.load()) SLEEP(100);
-        if (stopFlag.load()) return;
+        while (gCurrentVerifyLoggingTick > (gCurrentFetchingLogTick - 1) && !gStopFlag.load()) SLEEP(100);
+        if (gStopFlag.load()) return;
         uint32_t processFromTick = gCurrentVerifyLoggingTick;
         uint32_t processToTick = std::min(gCurrentVerifyLoggingTick + BATCH_VERIFICATION, gCurrentFetchingLogTick - 1);
         // detect END_EPOCH
@@ -499,7 +499,7 @@ gatherAllLoggingEvents:
                         }
                     }
                     if (!received_full) SLEEP(100);
-                    if (stopFlag.load(std::memory_order_relaxed)) return;
+                    if (gStopFlag.load(std::memory_order_relaxed)) return;
                 }
                 refetchLogFromTick = -1;
                 refetchLogToTick = -1;
@@ -508,7 +508,7 @@ gatherAllLoggingEvents:
                 Logger::get()->info("New log range for tick {}->{} : logID {}->{}", processFromTick, processToTick, fromId, fromId+length-1);
 
                 auto endId = fromId + length - 1;
-                while (!stopFlag.load())
+                while (!gStopFlag.load())
                 {
                     db_delete_logs(gCurrentProcessingEpoch, fromId, endId);
                     refetchFromId = fromId;
@@ -540,7 +540,7 @@ gatherAllLoggingEvents:
                         Logger::get()->info("Expected {} but get {}", length, vle.size());
                     }
                 }
-                if (stopFlag.load()) return;
+                if (gStopFlag.load()) return;
                 refetchFromId = -1;
                 refetchToId = -1;
             }
@@ -672,9 +672,9 @@ verifyNodeStateDigest:
         while (gCurrentVerifyLoggingTick == gCurrentFetchingTick)
         {
             SLEEP(100); // need to wait until tick data and votes arrive
-            if (stopFlag.load(std::memory_order_relaxed)) return;
+            if (gStopFlag.load(std::memory_order_relaxed)) return;
         }
-        if (stopFlag.load()) break;
+        if (gStopFlag.load()) break;
         m256i spectrumDigest, universeDigest;
         std::vector<TickVote> votes;
         int voteCount = 0;
@@ -742,7 +742,7 @@ verifyNodeStateDigest:
             {
                 // quorum already reach but not matched
                 Logger::get()->critical("Misalignment states!!! Cleaning all potential malformed data and restarting bob");
-                stopFlag.store(true);
+                gStopFlag.store(true);
                 SLEEP(1000);
                 processToTick = gCurrentFetchingLogTick - 1;
                 long long fromId, length;
@@ -847,8 +847,8 @@ verifyNodeStateDigest:
         // exit all requesters
         // serve slower nodes 30 more minutes before officially switching epoch
         Logger::get()->info("Received END_EPOCH message. Serving 30 minutes and then closing BOB");
-        SLEEP(1000ULL * 60 * 30); // 30 minutes
-        stopFlag = true;
+        SLEEP(1000ULL * gTimeToWaitEpochEnd); // 30 minutes
+        gStopFlag.store(true);
         // the endTick tick is a virtual tick, we need to migrate its data to new keys:
         uint32_t endTick = lastQuorumTick + 1; // the system just "borrow" this tick index
 
@@ -867,14 +867,13 @@ verifyNodeStateDigest:
 
 // The logging fetcher thread from trusted nodes only (no signature require)
 void EventRequestFromTrustedNode(ConnectionPool& connPoolWithPwd,
-                                 std::atomic_bool& stopFlag,
                                  std::chrono::milliseconds request_logging_cycle_ms)
 {
     auto idleBackoff = request_logging_cycle_ms;
 
-    while (!stopFlag.load(std::memory_order_relaxed)) {
+    while (!gStopFlag.load(std::memory_order_relaxed)) {
         try {
-            while (refetchLogFromTick != -1 && refetchLogToTick != -1 && !stopFlag.load(std::memory_order_relaxed))
+            while (refetchLogFromTick != -1 && refetchLogToTick != -1 && !gStopFlag.load(std::memory_order_relaxed))
             {
                 for (uint32_t t = refetchLogFromTick; t <= refetchLogToTick; t++)
                 {
@@ -886,7 +885,7 @@ void EventRequestFromTrustedNode(ConnectionPool& connPoolWithPwd,
                 }
                 SLEEP(1000);
             }
-            while (refetchFromId != -1 && refetchToId != -1 && !stopFlag.load(std::memory_order_relaxed))
+            while (refetchFromId != -1 && refetchToId != -1 && !gStopFlag.load(std::memory_order_relaxed))
             {
                 for (long long s = refetchFromId; s <= refetchToId; s += BOB_LOG_EVENT_CHUNK_SIZE) {
                     long long e = std::min(refetchToId, s + BOB_LOG_EVENT_CHUNK_SIZE - 1);
@@ -900,7 +899,7 @@ void EventRequestFromTrustedNode(ConnectionPool& connPoolWithPwd,
                 SLEEP(100);
                 continue;
             }
-            if (stopFlag.load(std::memory_order_relaxed)) break;
+            if (gStopFlag.load(std::memory_order_relaxed)) break;
             if (!db_check_log_range(gCurrentFetchingLogTick))
             {
                 RequestAllLogIdRangesFromTick ralr{{0,0,0,0},gCurrentFetchingLogTick};

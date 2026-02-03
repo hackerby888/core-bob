@@ -50,10 +50,13 @@
 #define gNumBMConnection (GS().gNumBMConnection)
 
 #define gKvrocksTTL (GS().gKvrocksTTL)
+#define gTimeToWaitEpochEnd (GS().gTimeToWaitEpochEnd)
 
 #define gRpcPort (GS().gRpcPort)
 #define gEnableAdminEndpoints (GS().gEnableAdminEndpoints)
 #define gAllowReceiveLogFromIncomingConnection (GS().gAllowReceiveLogFromIncomingConnection)
 #define gExitDataThreadCounter (GS().gExitDataThreadCounter)
+#define gStopFlag (GS().gStopFlag)
 #define gStartTimeUnix (GS().startTimeUnix)
 #define gAllowCheckInQubicGlobal (GS().allowCheckInQubicGlobal)
+#define gTCM (GS().TCM)

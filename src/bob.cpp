@@ -16,21 +16,19 @@
 #include <limits>    // std::numeric_limits
 #include <pthread.h> // thread naming on POSIX
 #include <random>    // std::random_device, std::mt19937
-void IOVerifyThread(std::atomic_bool& stopFlag);
-void IORequestThread(ConnectionPool& conn_pool, std::atomic_bool& stopFlag, std::chrono::milliseconds requestCycle, uint32_t futureOffset);
-void EventRequestFromTrustedNode(ConnectionPool& connPoolWithPwd, std::atomic_bool& stopFlag, std::chrono::milliseconds request_logging_cycle_ms);
-void connReceiver(QCPtr conn, const bool isTrustedNode, std::atomic_bool& stopFlag);
-void DataProcessorThread(std::atomic_bool& exitFlag);
-void RequestProcessorThread(std::atomic_bool& exitFlag);
-void verifyLoggingEvent(std::atomic_bool& stopFlag);
-void indexVerifiedTicks(std::atomic_bool& stopFlag);
-void querySmartContractThread(ConnectionPool& connPoolAll, std::atomic_bool& stopFlag);
+void IOVerifyThread();
+void IORequestThread(ConnectionPool& conn_pool, std::chrono::milliseconds requestCycle, uint32_t futureOffset);
+void EventRequestFromTrustedNode(ConnectionPool& connPoolWithPwd, std::chrono::milliseconds request_logging_cycle_ms);
+void connReceiver(QCPtr conn, const bool isTrustedNode);
+void DataProcessorThread();
+void RequestProcessorThread();
+void verifyLoggingEvent();
+void indexVerifiedTicks();
+void querySmartContractThread(ConnectionPool& connPoolAll);
 // Public helpers from QubicServer.cpp
 bool StartQubicServer(ConnectionPool* cp, uint16_t port = 21842);
 void StopQubicServer();
-void garbageCleaner(std::atomic_bool& stopFlag);
-
-std::atomic_bool stopFlag{false};
+void garbageCleaner();
 
 
 
@@ -44,7 +42,7 @@ static inline void set_this_thread_name(const char* name_in) {
 void requestToExitBob()
 {
     gExitDataThreadCounter = 0;
-    stopFlag = true;
+    gStopFlag = true;
 }
 
 void printVersionInfo() {
@@ -59,7 +57,7 @@ void printVersionInfo() {
 int runBob(int argc, char *argv[])
 {
     // Ignore SIGPIPE so write/send on a closed socket doesn't terminate the process.
-    stopFlag.store(false);
+    gStopFlag.store(false);
     struct sigaction sa;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
@@ -94,11 +92,12 @@ int runBob(int argc, char *argv[])
     gSpamThreshold = cfg.spam_qu_threshold;
     gMaxThreads = cfg.max_thread;
     gKvrocksTTL = cfg.kvrocks_ttl;
+    gTimeToWaitEpochEnd = cfg.wait_at_epoch_end;
     gRpcPort = cfg.rpc_port;
     gEnableAdminEndpoints = cfg.enable_admin_endpoints;
     gNodeAlias = cfg.nodeAlias;
-    using namespace std::chrono;
-    gStartTimeUnix = duration_cast<seconds>(system_clock::now().time_since_epoch()).count();
+    gStartTimeUnix = std::chrono::duration_cast<std::chrono::seconds>
+            (std::chrono::system_clock::now().time_since_epoch()).count();
     gAllowCheckInQubicGlobal = cfg.allow_check_in_qubic_global;
     gAllowReceiveLogFromIncomingConnection = cfg.allow_receive_log_from_incoming_connections;
 
@@ -169,7 +168,7 @@ int runBob(int argc, char *argv[])
             ( (initEpoch < gCurrentProcessingEpoch && !isThisEpochAlreadyEnd) ||
               (initEpoch <= gCurrentProcessingEpoch && isThisEpochAlreadyEnd)
             ))
-            && (!stopFlag.load())
+            && (!gStopFlag.load())
     )
     {
         doHandshakeAndGetBootstrapInfo(connPool, true, initTick, initEpoch);
@@ -179,7 +178,7 @@ int runBob(int argc, char *argv[])
         if (retryCount++ > 300)
         {
             Logger::get()->info("No meaningful response after 5 minutes. Exiting bob to get new peers");
-            stopFlag = true;
+            gStopFlag.store(true);
         }
     }
     db_insert_u32("init_tick:"+std::to_string(initEpoch), initTick);
@@ -213,7 +212,6 @@ int runBob(int argc, char *argv[])
                 set_this_thread_name("io-req");
                 IORequestThread(
                         std::ref(connPool),
-                        std::ref(stopFlag),
                         std::chrono::milliseconds(request_cycle_ms),
                         static_cast<uint32_t>(future_offset)
                 );
@@ -221,20 +219,21 @@ int runBob(int argc, char *argv[])
     );
     auto verify_thread = std::thread([&](){
         set_this_thread_name("verify");
-        IOVerifyThread(std::ref(stopFlag));
+        IOVerifyThread();
     });
     auto log_request_trusted_nodes_thread = std::thread([&](){
         set_this_thread_name("trusted-log-req");
-        EventRequestFromTrustedNode(std::ref(connPool), std::ref(stopFlag),
+        EventRequestFromTrustedNode(std::ref(connPool),
                                     std::chrono::milliseconds(request_logging_cycle_ms));
     });
     auto indexer_thread = std::thread([&](){
         set_this_thread_name("indexer");
-        indexVerifiedTicks(std::ref(stopFlag));
+        indexVerifiedTicks();
     });
+    gTCM = new TimedCacheMap<>();
     auto sc_thread = std::thread([&](){
         set_this_thread_name("sc");
-        querySmartContractThread(connPool, std::ref(stopFlag));
+        querySmartContractThread(connPool);
     });
     int pool_size = connPool.size();
     std::vector<std::thread> v_recv_thread;
@@ -251,7 +250,7 @@ int runBob(int argc, char *argv[])
             set_this_thread_name(nm);
             if (connPool.get(i, qc))
             {
-                connReceiver(qc, isTrustedNode, std::ref(stopFlag));
+                connReceiver(qc, isTrustedNode);
             }
             else
             {
@@ -264,24 +263,24 @@ int runBob(int argc, char *argv[])
     {
         v_data_thread.emplace_back([&](){
             set_this_thread_name("data");
-            DataProcessorThread(std::ref(stopFlag));
+            DataProcessorThread();
         });
         v_data_thread.emplace_back([&, i](){
             char nm[16];
             std::snprintf(nm, sizeof(nm), "reqp-%d", i);
             set_this_thread_name(nm);
-            RequestProcessorThread(std::ref(stopFlag));
+            RequestProcessorThread();
         });
     }
     std::thread log_event_verifier_thread;
     log_event_verifier_thread = std::thread([&](){
         set_this_thread_name("log-ver");
-        verifyLoggingEvent(std::ref(stopFlag));
+        verifyLoggingEvent();
     });
     std::thread garbage_thread;
     if (cfg.tick_storage_mode != TickStorageMode::Free || cfg.tx_storage_mode != TxStorageMode::Free)
     {
-        garbage_thread = std::thread(garbageCleaner, std::ref(stopFlag));
+        garbage_thread = std::thread(garbageCleaner);
     }
 
 
@@ -294,7 +293,7 @@ int runBob(int argc, char *argv[])
     int checkInQubicGlobalCount = 0;
     CheckInQubicGlobal();
     auto start_time = std::chrono::high_resolution_clock::now();
-    while (!stopFlag.load())
+    while (!gStopFlag.load())
     {
         auto current_time = std::chrono::high_resolution_clock::now();
         float duration_ms = float(std::chrono::duration_cast<std::chrono::milliseconds>(current_time - start_time).count());
@@ -319,7 +318,7 @@ int runBob(int argc, char *argv[])
         responseSCData.clean(10);
 
         int count = 0;
-        while (count++ < sleep_time*10 && !stopFlag.load()) SLEEP(100);
+        while (count++ < sleep_time*10 && !gStopFlag.load()) SLEEP(100);
         if (compareLocalTickWithNetworkCount++ >= 24)
         {
             compareLocalTickWithNetworkCount = 0;
@@ -342,6 +341,7 @@ int runBob(int argc, char *argv[])
         }
     }
     // Signal stop, disconnect sockets first to break any blocking I/O.
+    Logger::get()->info("Disconnecting all connections");
     for (int i = 0; i < connPool.size(); i++)
     {
         QCPtr qc;
@@ -350,6 +350,7 @@ int runBob(int argc, char *argv[])
             qc->disconnect();
         }
     }
+    Logger::get()->info("Disconnected all connections");
     // Stop and join producer/request threads first so they cannot enqueue more work.
     verify_thread.join();
     Logger::get()->info("Exited Verifying thread");
@@ -359,7 +360,11 @@ int runBob(int argc, char *argv[])
     Logger::get()->info("Exited LogEventRequestTrustedNodes thread");
     indexer_thread.join();
     Logger::get()->info("Exited indexer thread");
+
     sc_thread.join();
+    delete gTCM;
+    Logger::get()->info("Exited SC thread");
+
     if (log_event_verifier_thread.joinable())
     {
         log_event_verifier_thread.join();

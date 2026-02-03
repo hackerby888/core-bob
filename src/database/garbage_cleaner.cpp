@@ -125,7 +125,7 @@ bool cleanRawTick(uint32_t fromTick, uint32_t toTick, bool withTransactions)
     return true;
 }
 
-void garbageCleaner(std::atomic_bool& stopFlag)
+void garbageCleaner()
 {
     Logger::get()->info("Start garbage cleaner");
     uint32_t loadedCleanTickData = 0;
@@ -159,10 +159,10 @@ void garbageCleaner(std::atomic_bool& stopFlag)
     if (lastCleanTickData < gInitialTick) lastCleanTickData = gInitialTick;
     if (lastCleanTransactionTick < gInitialTick) lastCleanTransactionTick = gInitialTick;
     uint32_t lastReportedTick = 0;
-    while (!stopFlag.load())
+    while (!gStopFlag.load())
     {
         SLEEP(100);
-        if (stopFlag.load()) break;
+        if (gStopFlag.load()) break;
         if (gTickStorageMode == TickStorageMode::LastNTick)
         {
             long long cleanToTick = (long long)(gCurrentIndexingTick.load()) - 5;

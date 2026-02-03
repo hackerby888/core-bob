@@ -171,3 +171,213 @@ private:
     std::condition_variable cv_not_full_;
     std::condition_variable cv_not_empty_;
 };
+
+struct dataWithTime
+{
+    uint64_t unixTimestamp;
+    std::vector<uint8_t> data;
+};
+
+/**
+ * @class TimedCacheMap
+ * @brief A thread-safe cache map with automatic time-based expiration and capacity limits.
+ *
+ * @tparam L Maximum number of elements (default: 32768)
+ * @tparam T Expiration time in seconds (default: 6)
+ */
+template<size_t L = 32768, uint64_t T = 6>
+class TimedCacheMap {
+public:
+    TimedCacheMap() : should_stop_(false) {
+        // Start the cleanup thread
+        cleanup_thread_ = std::thread(&TimedCacheMap::cleanup_worker, this);
+    }
+
+    ~TimedCacheMap() {
+        {
+            std::lock_guard<std::mutex> lock(mtx_);
+            should_stop_ = true;
+        }
+        cv_cleanup_.notify_one();
+        if (cleanup_thread_.joinable()) {
+            cleanup_thread_.join();
+        }
+    }
+
+    // Disable copy and assignment
+    TimedCacheMap(const TimedCacheMap&) = delete;
+    TimedCacheMap& operator=(const TimedCacheMap&) = delete;
+
+    /**
+     * @brief Adds a new entry to the cache with a vector value.
+     * @param key The m256i key
+     * @param value The data vector to store
+     */
+    void add(m256i key, std::vector<uint8_t> value) {
+        std::lock_guard<std::mutex> lock(mtx_);
+        if (data_map_.find(key) != data_map_.end())
+        {
+            // already exist
+            return;
+        }
+        // If at capacity and key doesn't exist, remove oldest
+        if (data_map_.size() >= L && data_map_.find(key) == data_map_.end()) {
+            remove_oldest();
+        }
+
+        uint64_t current_time = get_current_timestamp();
+        data_map_[key] = {current_time, std::move(value)};
+    }
+
+    /**
+     * @brief Adds a new entry to the cache from raw pointer and size.
+     * @param key The m256i key
+     * @param ptr Pointer to the raw data
+     * @param sz Size of the data in bytes
+     */
+    void addRaw(m256i key, const uint8_t* ptr, const int sz) {
+        if (!ptr || sz < 0) {
+            return;
+        }
+
+        std::lock_guard<std::mutex> lock(mtx_);
+
+        // If at capacity and key doesn't exist, remove oldest
+        if (data_map_.size() >= L && data_map_.find(key) == data_map_.end()) {
+            remove_oldest();
+        }
+
+        uint64_t current_time = get_current_timestamp();
+        std::vector<uint8_t> data(ptr, ptr + sz);
+        data_map_[key] = {current_time, std::move(data)};
+    }
+
+    /**
+     * @brief Tries to retrieve a value from the cache.
+     * @param key The m256i key to search for
+     * @param ptr Pointer to buffer where data will be copied (will be set to nullptr if not found)
+     * @param sz Reference to int that will contain the size (will be set to 0 if not found)
+     * @return true if key was found and data copied, false otherwise
+     */
+    bool tryGetRaw(m256i key, uint8_t*& ptr, int& sz) {
+        std::lock_guard<std::mutex> lock(mtx_);
+
+        auto it = data_map_.find(key);
+        if (it == data_map_.end()) {
+            ptr = nullptr;
+            sz = 0;
+            return false;
+        }
+
+        const auto& data = it->second.data;
+        sz = static_cast<int>(data.size());
+
+        if (sz > 0 && ptr != nullptr) {
+            memcpy(ptr, data.data(), sz);
+            return true;
+        } else if (sz == 0) {
+            ptr = nullptr;
+            return true;
+        }
+
+        ptr = nullptr;
+        sz = 0;
+        return false;
+    }
+
+    /**
+     * @brief Tries to retrieve a value from the cache into a vector.
+     * @param key The m256i key to search for
+     * @param value Reference to vector that will be populated with the data
+     * @return true if key was found and data copied, false otherwise
+     */
+    bool tryGet(m256i key, std::vector<uint8_t>& value) {
+        std::lock_guard<std::mutex> lock(mtx_);
+
+        auto it = data_map_.find(key);
+        if (it == data_map_.end()) {
+            value.clear();
+            return false;
+        }
+
+        value = it->second.data;
+        return true;
+    }
+
+
+    /**
+     * @brief Returns the current number of elements in the cache.
+     */
+    size_t size() const {
+        std::lock_guard<std::mutex> lock(mtx_);
+        return data_map_.size();
+    }
+
+private:
+    /**
+     * @brief Gets current Unix timestamp in seconds.
+     */
+    static uint64_t get_current_timestamp() {
+        return static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()
+                ).count()
+        );
+    }
+
+    /**
+     * @brief Removes the oldest entry from the map (not thread-safe, must be called with lock held).
+     */
+    void remove_oldest() {
+        if (data_map_.empty()) {
+            return;
+        }
+
+        auto oldest_it = data_map_.begin();
+        uint64_t oldest_time = oldest_it->second.unixTimestamp;
+
+        for (auto it = data_map_.begin(); it != data_map_.end(); ++it) {
+            if (it->second.unixTimestamp < oldest_time) {
+                oldest_time = it->second.unixTimestamp;
+                oldest_it = it;
+            }
+        }
+
+        data_map_.erase(oldest_it);
+    }
+
+    /**
+     * @brief Background worker thread that periodically cleans up expired entries.
+     */
+    void cleanup_worker() {
+        while (true) {
+            std::unique_lock<std::mutex> lock(mtx_);
+
+            // Wait for T seconds or until notified to stop
+            cv_cleanup_.wait_for(lock, std::chrono::seconds(T), [this] {
+                return should_stop_;
+            });
+
+            if (should_stop_) {
+                break;
+            }
+
+            // Remove expired entries
+            uint64_t current_time = get_current_timestamp();
+            auto it = data_map_.begin();
+            while (it != data_map_.end()) {
+                if (current_time - it->second.unixTimestamp >= T) {
+                    it = data_map_.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
+    }
+
+    std::map<m256i, dataWithTime> data_map_;
+    mutable std::mutex mtx_;
+    std::condition_variable cv_cleanup_;
+    std::thread cleanup_thread_;
+    bool should_stop_;
+};

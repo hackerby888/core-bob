@@ -362,7 +362,31 @@ static bool parseHexInput(const std::string& inputDataHex, std::vector<uint8_t>&
     return true;
 }
 
-SmartContractQueryResult checkSmartContractResult(uint32_t nonce) {
+m256i makeHashQuerySC(uint32_t scIndex, uint32_t funcNumber, const std::string& inputDataHex)
+{
+    m256i digest{};
+    std::vector<uint8_t> nonceData;
+    nonceData.reserve(sizeof(uint32_t) * 2 + inputDataHex.size());
+
+    // Append scIndex and funcNumber
+    nonceData.insert(nonceData.end(),
+                     reinterpret_cast<uint8_t *>(&scIndex),
+                     reinterpret_cast<uint8_t *>(&scIndex) + sizeof(uint32_t));
+    nonceData.insert(nonceData.end(),
+                     reinterpret_cast<uint8_t *>(&funcNumber),
+                     reinterpret_cast<uint8_t *>(&funcNumber) + sizeof(uint32_t));
+
+    // Append input hex data
+    nonceData.insert(nonceData.end(), inputDataHex.begin(), inputDataHex.end());
+
+    // Calculate K12 hash
+    KangarooTwelve(nonceData.data(), nonceData.size(), digest.m256i_u8, 32);
+    return digest;
+}
+
+SmartContractQueryResult checkSmartContractResult(uint32_t nonce, uint32_t scIndex,
+                                                  uint32_t funcNumber, const std::string& inputDataHex)
+{
     SmartContractQueryResult result;
     result.nonce = nonce;
 
@@ -370,11 +394,36 @@ SmartContractQueryResult checkSmartContractResult(uint32_t nonce) {
     if (responseSCData.get(nonce, out)) {
         result.success = true;
         result.data = bytesToHex(out.data(), out.size());
+
+        m256i hash = ApiHelpers::makeHashQuerySC(scIndex, funcNumber, inputDataHex);
+        gTCM->add(hash, out);
     } else {
         result.pending = true;
     }
 
     return result;
+}
+
+// Non-blocking enqueue: send a SC query and return immediately
+bool enqueueSmartContractRequest(uint32_t nonce, uint32_t scIndex, uint32_t funcNumber, const uint8_t* data, uint32_t dataSize)
+{
+    std::vector<uint8_t> vdata(dataSize + sizeof(RequestContractFunction) + sizeof(RequestResponseHeader));
+    RequestContractFunction rcf{};
+    rcf.contractIndex = scIndex;
+    rcf.inputSize = dataSize;
+    rcf.inputType = funcNumber;
+
+    auto header = (RequestResponseHeader*)vdata.data();
+    header->setType(RequestContractFunction::type);
+    header->setSize(dataSize + sizeof(RequestResponseHeader) + sizeof(RequestContractFunction));
+    header->setDejavu(nonce);
+
+    memcpy(vdata.data() + sizeof(RequestResponseHeader), &rcf, sizeof(RequestResponseHeader));
+    if (dataSize)
+        memcpy(vdata.data() + sizeof(RequestResponseHeader) + sizeof(RequestContractFunction), data, dataSize);
+
+    // fire-and-forget to SC thread
+    return MRB_SC.EnqueuePacket(vdata.data());
 }
 
 SmartContractQueryResult querySmartContract(uint32_t nonce, uint32_t scIndex,
@@ -394,6 +443,18 @@ SmartContractQueryResult querySmartContract(uint32_t nonce, uint32_t scIndex,
         result.success = true;
         result.data = bytesToHex(out.data(), out.size());
         return result;
+    }
+
+    // cache level 2
+    {
+        m256i digest{};
+        digest = makeHashQuerySC(scIndex, funcNumber, inputDataHex);
+        if (gTCM->tryGet(digest, out))
+        {
+            result.success = true;
+            result.data = bytesToHex(out.data(), out.size());
+            return result;
+        }
     }
 
     // Parse input data

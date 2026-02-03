@@ -20,7 +20,7 @@
 #include "../shim.h"
 
 // Forward declaration from IOProcessor.cpp
-void connReceiver(QCPtr conn, const bool isTrustedNode, std::atomic_bool& stopFlag);
+void connReceiver(QCPtr conn, const bool isTrustedNode);
 
 namespace {
     // Simple connection limiter with global and per-IP limits
@@ -342,7 +342,7 @@ namespace {
                     try {
                         ctx->conn->doHandshake();
                         // Run the main receiver loop
-                        connReceiver(ctx->conn, isTrustedNode, ctx->stopFlag);
+                        connReceiver(ctx->conn, isTrustedNode);
 
                     } catch (const std::exception& ex) {
                         Logger::get()->debug("QubicServer: Exception for {}: {}",

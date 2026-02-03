@@ -72,7 +72,8 @@ struct GlobalState {
 
     int gNumBMConnection = 0;
 
-    long long gKvrocksTTL = 1814400;
+    long long gKvrocksTTL = 1209600;
+    long long gTimeToWaitEpochEnd = 1800;
 
     unsigned gRpcPort = 40420;
     bool gEnableAdminEndpoints = false;  // Admin endpoints disabled by default
@@ -83,6 +84,10 @@ struct GlobalState {
     uint64_t startTimeUnix = 0;
 
     bool allowCheckInQubicGlobal = true;
+
+    std::atomic_bool gStopFlag;
+
+    TimedCacheMap<>* TCM;
 };
 
 // Safe, lazy singleton accessor avoids static init order issues.
