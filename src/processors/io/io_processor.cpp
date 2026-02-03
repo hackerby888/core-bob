@@ -6,6 +6,38 @@
 #include <cassert>
 #include <iomanip>
 
+class IOProcessorUtils {
+public:
+    static bool checkAllowedTypeForNonTrusted(int type)
+    {
+        if (type == RespondLog::type()) return false;
+        if (type == LogRangesPerTxInTick::type()) return false;
+        return true;
+    }
+
+    static bool isRequestType(int type)
+    {
+        if (type == REQUEST_COMPUTOR_LIST) return true;                   // request computor list
+        if (type == RequestedQuorumTick::type) return true;               // request vote
+        if (type == RequestTickData::type) return true;                   // request tickdata
+        if (type == REQUEST_CURRENT_TICK_INFO) return true;               // REQUEST_CURRENT_TICK_INFO
+        if (type == RequestedTickTransactions::type) return true;         // request tx
+        if (type == RequestLog::type()) return true;                      // request log
+        if (type == RequestAllLogIdRangesFromTick::type()) return true;   // request log range
+        return false;
+    }
+    static bool isDataType(int type)
+    {
+        if (type == TickVote::type()) return true;                        // vote
+        if (type == TickData::type()) return true;                        // tickdata
+        if (type == BROADCAST_TRANSACTION) return true;                   // tx
+        if (type == RespondLog::type()) return true;                      // log
+        if (type == LogRangesPerTxInTick::type()) return true;  // logrange
+        if (type == RespondContractFunction::type) return true;
+        return false;
+    }
+};
+
 void processTickVote(uint8_t* ptr)
 {
     TickVote _vote;
@@ -452,7 +484,6 @@ void replyCurrentTickInfo(QCPtr& conn, uint32_t dejavu, uint8_t* ptr)
     conn->enqueueSend((uint8_t *) &pl, sizeof(pl));
 }
 
-
 void requestProcessorThread()
 {
     std::vector<uint8_t> buf;
@@ -508,4 +539,79 @@ void requestProcessorThread()
         }
     }
     gExitDataThreadCounter++;
+}
+
+// Receiver thread: continuously receives full packets and enqueues them into the global round buffer (MRB).
+void connReceiver(QCPtr conn, const bool isTrustedNode)
+{
+    using namespace std::chrono_literals;
+
+    const auto errorBackoff = 1000ms;
+
+    std::vector<uint8_t> packet;
+    packet.reserve(64 * 1024); // Optional: initial capacity to minimize reallocations
+    while (!gStopFlag.load(std::memory_order_relaxed)) {
+        try {
+            // Blocking receive of a complete packet from the connection.
+            RequestResponseHeader hdr{};
+            conn->receiveAFullPacket(hdr, packet);
+            if (packet.empty()) {
+                // Defensive check; shouldn't happen if receiveAFullPacket succeeds.
+                if (!conn->isReconnectable()) return;
+                Logger::get()->trace("connReceiver error on : {}. Disconnecting", conn->getNodeIp());
+                conn->disconnect();
+                SLEEP(errorBackoff);
+                conn->reconnect();
+                continue;
+            }
+            if (!isTrustedNode)
+            {
+                if (!gAllowReceiveLogFromIncomingConnection) // if operator already allowed to receive, no need to block
+                {
+                    if (!IOProcessorUtils::checkAllowedTypeForNonTrusted(hdr.type()))
+                    {
+                        continue; //drop
+                    }
+                }
+            }
+            // trusted conn allowed all packets
+            if (IOProcessorUtils::isDataType(hdr.type()))
+            {
+                // Enqueue the packet into the global MutexRoundBuffer.
+                bool ok = MRB_Data.EnqueuePacket(packet.data());
+                if (!ok) {
+                    Logger::get()->warn("connReceiver: failed to enqueue packet (size={}, type={}). Dropped.",
+                                        packet.size(),
+                                        static_cast<unsigned>(hdr.type()));
+                }
+            }
+
+            if (IOProcessorUtils::isRequestType(hdr.type()))
+            {
+                bool ok = MRB_Request.EnqueuePacket(packet.data());
+                if (!ok) {
+                    Logger::get()->warn("connReceiver: failed to enqueue packet (size={}, type={}). Dropped.",
+                                        packet.size(),
+                                        static_cast<unsigned>(hdr.type()));
+                }
+                else
+                {
+                    requestMapperTo.add(hdr.getDejavu(), nullptr, 0, conn);
+                }
+            }
+
+        } catch (const std::logic_error& ex) {
+            if (!conn->isReconnectable()) return;
+            Logger::get()->trace("connReceiver error on : {}. Disconnecting", conn->getNodeIp());
+            conn->disconnect();
+            SLEEP(errorBackoff);
+            conn->reconnect();
+        } catch (...) {
+            if (!conn->isReconnectable()) return;
+            Logger::get()->trace("connReceiver unknown exception from ip {}", conn->getNodeIp());
+            conn->disconnect();
+            SLEEP(errorBackoff);
+            conn->reconnect();
+        }
+    }
 }
