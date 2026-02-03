@@ -1,4 +1,4 @@
-!/bin/bash
+#!/bin/bash
 
 # Qubic RPC Test Script
 # Tests all read-only methods on both HTTP and WebSocket endpoints
