@@ -230,6 +230,7 @@ int runBob(int argc, char *argv[])
         set_this_thread_name("indexer");
         indexVerifiedTicks();
     });
+    gTCM = new TimedCacheMap<>();
     auto sc_thread = std::thread([&](){
         set_this_thread_name("sc");
         querySmartContractThread(connPool);
@@ -359,7 +360,11 @@ int runBob(int argc, char *argv[])
     Logger::get()->info("Exited LogEventRequestTrustedNodes thread");
     indexer_thread.join();
     Logger::get()->info("Exited indexer thread");
+
     sc_thread.join();
+    delete gTCM;
+    Logger::get()->info("Exited SC thread");
+
     if (log_event_verifier_thread.joinable())
     {
         log_event_verifier_thread.join();

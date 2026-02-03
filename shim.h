@@ -59,3 +59,4 @@
 #define gStopFlag (GS().gStopFlag)
 #define gStartTimeUnix (GS().startTimeUnix)
 #define gAllowCheckInQubicGlobal (GS().allowCheckInQubicGlobal)
+#define gTCM (GS().TCM)

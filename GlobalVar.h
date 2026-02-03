@@ -87,6 +87,8 @@ struct GlobalState {
     bool allowCheckInQubicGlobal = true;
 
     std::atomic_bool gStopFlag;
+
+    TimedCacheMap<>* TCM;
 };
 
 // Safe, lazy singleton accessor avoids static init order issues.

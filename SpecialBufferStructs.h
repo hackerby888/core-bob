@@ -215,7 +215,11 @@ public:
      */
     void add(m256i key, std::vector<uint8_t> value) {
         std::lock_guard<std::mutex> lock(mtx_);
-
+        if (data_map_.find(key) != data_map_.end())
+        {
+            // already exist
+            return;
+        }
         // If at capacity and key doesn't exist, remove oldest
         if (data_map_.size() >= L && data_map_.find(key) == data_map_.end()) {
             remove_oldest();
@@ -255,7 +259,7 @@ public:
      * @param sz Reference to int that will contain the size (will be set to 0 if not found)
      * @return true if key was found and data copied, false otherwise
      */
-    bool tryGet(m256i key, uint8_t*& ptr, int& sz) {
+    bool tryGetRaw(m256i key, uint8_t*& ptr, int& sz) {
         std::lock_guard<std::mutex> lock(mtx_);
 
         auto it = data_map_.find(key);
@@ -280,6 +284,26 @@ public:
         sz = 0;
         return false;
     }
+
+    /**
+     * @brief Tries to retrieve a value from the cache into a vector.
+     * @param key The m256i key to search for
+     * @param value Reference to vector that will be populated with the data
+     * @return true if key was found and data copied, false otherwise
+     */
+    bool tryGet(m256i key, std::vector<uint8_t>& value) {
+        std::lock_guard<std::mutex> lock(mtx_);
+
+        auto it = data_map_.find(key);
+        if (it == data_map_.end()) {
+            value.clear();
+            return false;
+        }
+
+        value = it->second.data;
+        return true;
+    }
+
 
     /**
      * @brief Returns the current number of elements in the cache.

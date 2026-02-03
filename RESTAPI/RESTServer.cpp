@@ -559,9 +559,9 @@ namespace {
         auto pollResultPtr = std::make_shared<std::function<void()>>();
         std::weak_ptr<std::function<void()>> pollResultWeak = pollResultPtr;
 
-        *pollResultPtr = [nonce, sharedCallback, attemptCount, startTime, loop, pollResultWeak]() {
+        *pollResultPtr = [nonce, sharedCallback, attemptCount, startTime, loop, pollResultWeak, scIndex, funcNumber, data]() {
             // Check for result using shared helper
-            SmartContractQueryResult result = ApiHelpers::checkSmartContractResult(nonce);
+            SmartContractQueryResult result = ApiHelpers::checkSmartContractResult(nonce, scIndex, funcNumber, data);
 
             if (result.success) {
                 Json::Value root;

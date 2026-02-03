@@ -135,8 +135,11 @@ SmartContractQueryResult querySmartContract(uint32_t nonce, uint32_t scIndex,
 // Check if a smart contract query result is available (by nonce)
 // @param nonce: unique identifier for the query
 // @return SmartContractQueryResult with response data if available
-SmartContractQueryResult checkSmartContractResult(uint32_t nonce);
+SmartContractQueryResult checkSmartContractResult(uint32_t nonce, uint32_t scIndex,
+                                                  uint32_t funcNumber, const std::string& inputDataHex);
 
+// @return K12 of scIndex funcNumber and inputDataHex
+m256i makeHashQuerySC(uint32_t scIndex, uint32_t funcNumber, const std::string& inputDataHex);
 // ============================================================================
 // Utility Functions
 // ============================================================================

@@ -21,28 +21,6 @@ static std::string toHex(const std::vector<uint8_t>& data) {
     return ss.str();
 }
 
-// Non-blocking enqueue: send a SC query and return immediately
-bool enqueueSmartContractRequest(uint32_t nonce, uint32_t scIndex, uint32_t funcNumber, const uint8_t* data, uint32_t dataSize)
-{
-    std::vector<uint8_t> vdata(dataSize + sizeof(RequestContractFunction) + sizeof(RequestResponseHeader));
-    RequestContractFunction rcf{};
-    rcf.contractIndex = scIndex;
-    rcf.inputSize = dataSize;
-    rcf.inputType = funcNumber;
-
-    auto header = (RequestResponseHeader*)vdata.data();
-    header->setType(RequestContractFunction::type);
-    header->setSize(dataSize + sizeof(RequestResponseHeader) + sizeof(RequestContractFunction));
-    header->setDejavu(nonce);
-
-    memcpy(vdata.data() + sizeof(RequestResponseHeader), &rcf, sizeof(RequestResponseHeader));
-    if (dataSize)
-        memcpy(vdata.data() + sizeof(RequestResponseHeader) + sizeof(RequestContractFunction), data, dataSize);
-
-    // fire-and-forget to SC thread
-    return MRB_SC.EnqueuePacket(vdata.data());
-}
-
 std::string bobGetBalance(const char* identity)
 {
     if (!identity) return "{\"error\": \"Wrong identity format\"}";
@@ -541,49 +519,6 @@ std::string bobGetStatus()
            ",\"bobCompiler\": \"" + COMPILER_NAME + "\""
             ",\"extraInfo\": " + bobGetExtraStatus() +
            "}";
-}
-
-std::string querySmartContract(uint32_t nonce, uint32_t scIndex, uint32_t funcNumber, uint8_t* data, uint32_t dataSize)
-{
-    // Preserve existing sync API for backwards compatibility,
-    // but avoid blocking the thread for long: do a single immediate check, else enqueue and return pending.
-    std::vector<uint8_t> dataOut;
-    Json::Value root;
-
-    if (responseSCData.get(nonce, dataOut)) {
-        root["nonce"] = nonce;
-        root["data"] = toHex(dataOut);
-    } else {
-        enqueueSmartContractRequest(nonce, scIndex, funcNumber, data, dataSize);
-        root["error"] = "pending";
-        root["message"] = "Query enqueued; try again shortly with the same nonce";
-    }
-
-    Json::FastWriter writer;
-    return writer.write(root);
-}
-
-
-std::string broadcastTransaction(uint8_t* txDataWithHeader, int size)
-{
-    auto tx = (Transaction*)(txDataWithHeader+sizeof(RequestResponseHeader));
-    if (tx->inputSize + sizeof(Transaction) + sizeof(RequestResponseHeader) + SIGNATURE_SIZE != size)
-    {
-        return "{\"error\": \"Invalid size\"}";
-    }
-    m256i digest{};
-    uint8_t* signature = txDataWithHeader + sizeof(RequestResponseHeader) + sizeof(Transaction) + tx->inputSize;
-    KangarooTwelve(reinterpret_cast<const uint8_t *>(tx), size - sizeof(RequestResponseHeader) - SIGNATURE_SIZE, digest.m256i_u8, 32);
-    if (!verify(tx->sourcePublicKey, digest.m256i_u8, signature))
-    {
-        return "{\"error\": \"Invalid signature\"}";
-    }
-    MRB_SC.EnqueuePacket(txDataWithHeader);
-    KangarooTwelve(reinterpret_cast<const uint8_t *>(tx), size - sizeof(RequestResponseHeader), digest.m256i_u8, 32);
-    char hash[64]={0};
-    getIdentityFromPublicKey(digest.m256i_u8, hash, true);
-    std::string txHash(hash);
-    return "{\"txHash\": \"" + txHash + "\"}";
 }
 
 std::string bobGetEpochInfo(uint16_t epoch)
