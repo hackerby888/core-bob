@@ -342,6 +342,7 @@ int runBob(int argc, char *argv[])
         }
     }
     // Signal stop, disconnect sockets first to break any blocking I/O.
+    Logger::get()->info("Disconnecting all connections");
     for (int i = 0; i < connPool.size(); i++)
     {
         QCPtr qc;
@@ -350,6 +351,7 @@ int runBob(int argc, char *argv[])
             qc->disconnect();
         }
     }
+    Logger::get()->info("Disconnected all connections");
     // Stop and join producer/request threads first so they cannot enqueue more work.
     verify_thread.join();
     Logger::get()->info("Exited Verifying thread");
