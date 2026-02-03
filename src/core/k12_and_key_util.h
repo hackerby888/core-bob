@@ -589,6 +589,12 @@ static void KangarooTwelve(const uint8_t *input, unsigned int inputByteLen, uint
     KeccakP1600_Permute_12rounds(finalNode.state);
     memcpy(output, finalNode.state, outputByteLen);
 }
+
+static void KangarooTwelve64To32(void* input, void* output)
+{
+    KangarooTwelve((uint8_t*)input, 64, (uint8_t*)output, 32);
+}
+
 #define CURVE_ORDER_0 0x2FB2540EC7768CE7
 #define CURVE_ORDER_1 0xDFBD004DFE0F7999
 #define CURVE_ORDER_2 0xF05397829CBC14E5
@@ -2357,6 +2363,18 @@ BOOL_FUNC_DECL verify(const unsigned char* publicKey, const unsigned char* messa
     encode(A, (unsigned char*)A);
 
     return (memcmp(A, signature, 32) == 0);
+}
+
+static bool verifySignature(void* ptr, uint8_t* pubkey, int structSize) // structSize include sig 64 bytes
+{
+    uint8_t* p = (uint8_t*)ptr;
+    uint8_t digest[32];
+    KangarooTwelve(p, structSize - 64, digest, 32);
+    if (verify(pubkey, digest, p + structSize - 64))
+    {
+        return true;
+    }
+    return false;
 }
 
 static bool getSubseedFromSeed(const uint8_t* seed, uint8_t* subseed)

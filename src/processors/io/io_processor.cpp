@@ -6,17 +6,6 @@
 #include <cassert>
 #include <iomanip>
 
-bool verifySignature(void* ptr, uint8_t* pubkey, int structSize) // structSize include sig 64 bytes
-{
-    uint8_t* p = (uint8_t*)ptr;
-    uint8_t digest[32];
-    KangarooTwelve(p, structSize - 64, digest, 32);
-    if (verify(pubkey, digest, p + structSize - 64))
-    {
-        return true;
-    }
-    return false;
-}
 void processTickVote(uint8_t* ptr)
 {
     TickVote _vote;

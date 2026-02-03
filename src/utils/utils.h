@@ -1,5 +1,7 @@
 #pragma once
 
+#include <iomanip>
+#include <ios>
 #include <random>
 
 static void byteToHex(const uint8_t* byte, char* hex, const int sizeInByte)
@@ -42,4 +44,14 @@ static bool isArrayZero(uint8_t *ptr, int len) {
         }
     }
     return true;
+}
+
+// Helper to convert byte array to hex string
+static std::string bytes_to_hex_string(const unsigned char* bytes, size_t size) {
+    std::stringstream ss;
+    ss << std::hex << std::setfill('0');
+    for (size_t i = 0; i < size; ++i) {
+        ss << std::setw(2) << static_cast<unsigned int>(bytes[i]);
+    }
+    return ss.str();
 }

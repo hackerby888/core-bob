@@ -9,6 +9,7 @@
 #include "src/rest_api/LogSubscriptionManager.h"
 #include "src/rest_api/QubicSubscriptionManager.h"
 #include "src/shim.h"
+#include "src/fs/file_io.h"
 
 #include <atomic>
 #include <chrono>
@@ -26,12 +27,6 @@ extern "C" {
 int KT128(const unsigned char *input, size_t inputByteLen,
           unsigned char *output, size_t outputByteLen,
           const unsigned char *customization, size_t customByteLen);
-}
-
-static void KangarooTwelve64To32(void* input, void* output)
-{
-//    KT128((uint8_t*)input, 64, (uint8_t*)output, 32, nullptr, 0);
-    KangarooTwelve((uint8_t*)input, 64, (uint8_t*)output, 32);
 }
 
 void computeSpectrumDigest(const uint32_t tickStart, const uint32_t tickEnd)
@@ -284,82 +279,6 @@ void processChangeManagingContract(LogEvent& le0, LogEvent& le1)
         Logger::get()->error("Failed to transfer management rights");
         exit(1);
     }
-}
-
-// Small helper to load a fixed-size array from a binary file with uniform logging.
-static bool loadFile(const std::string& path,
-                     void* outBuffer,
-                     size_t elementSize,
-                     size_t elementCount,
-                     const char* label)
-{
-    Logger::get()->info("Loading file {}", path);
-    FILE* f = fopen(path.c_str(), "rb");
-    if (!f) {
-        Logger::get()->error("Failed to open {} file: {}", label, path);
-        return false;
-    }
-    size_t readCount = fread(outBuffer, elementSize, elementCount, f);
-    fclose(f);
-    if (readCount != elementCount) {
-        Logger::get()->error("Failed to read {} file. Expected {} records, got {}",
-                             label, elementCount, readCount);
-        return false;
-    }
-    return true;
-}
-
-#define SAVE_PERIOD 1000
-
-void saveFiles(const std::string tickSpectrum, const std::string tickUniverse)
-{
-    FILE *f = fopen(tickSpectrum.c_str(), "wb");
-    if (!f) {
-        Logger::get()->error("Failed to open spectrum file for writing: {}", tickSpectrum);
-    } else {
-        if (fwrite(spectrum, sizeof(EntityRecord), SPECTRUM_CAPACITY, f) != SPECTRUM_CAPACITY) {
-            Logger::get()->error("Failed to write spectrum file: {}", tickSpectrum);
-        }
-        fclose(f);
-    }
-
-    f = fopen(tickUniverse.c_str(), "wb");
-    if (!f) {
-        Logger::get()->error("Failed to open universe file for writing: {}", tickUniverse);
-    } else {
-        if (fwrite(assets, sizeof(AssetRecord), ASSETS_CAPACITY, f) != ASSETS_CAPACITY) {
-            Logger::get()->error("Failed to write universe file: {}", tickUniverse);
-        }
-        fclose(f);
-    }
-}
-
-void saveState(uint32_t& tracker, uint32_t lastVerified)
-{
-    Logger::get()->info("Saving verified universe/spectrum {} - Do not shutdown", lastVerified);
-    std::string tickSpectrum = "spectrum." + std::to_string(lastVerified);
-    std::string tickUniverse = "universe." + std::to_string(lastVerified);
-    saveFiles(tickSpectrum, tickUniverse);
-    db_update_latest_verified_tick(lastVerified);
-    tickSpectrum = "spectrum." + std::to_string(tracker);
-    tickUniverse = "universe." + std::to_string(tracker);
-    if (std::filesystem::exists(tickSpectrum) && std::filesystem::exists(tickUniverse)) {
-        std::filesystem::remove(tickSpectrum);
-        std::filesystem::remove(tickUniverse);
-    }
-    Logger::get()->info("Saved checkpoints. Deleted old verified universe/spectrum {}. ", lastVerified);
-    tracker = lastVerified;
-    db_insert_u32("verified_history:" + std::to_string(gCurrentProcessingEpoch), lastVerified);
-}
-
-// Helper to convert byte array to hex string
-static std::string bytes_to_hex_string(const unsigned char* bytes, size_t size) {
-    std::stringstream ss;
-    ss << std::hex << std::setfill('0');
-    for (size_t i = 0; i < size; ++i) {
-        ss << std::setw(2) << static_cast<unsigned int>(bytes[i]);
-    }
-    return ss.str();
 }
 
 static bool checkLogExistAndVerify(uint16_t epoch, long long logId)

@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <thread>
+
 static bool matchesTransaction(const QuTransfer &transfer, const Transaction &tx) {
     return transfer.sourcePublicKey == tx.sourcePublicKey &&
             transfer.destinationPublicKey == tx.destinationPublicKey &&
