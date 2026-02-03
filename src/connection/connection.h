@@ -1,6 +1,6 @@
 #pragma once
-#include "../core/structs.h"
-#include "../special_buffer_structs.h"
+#include "src/core/structs.h"
+#include "src/special_buffer_structs.h"
 #include <algorithm>
 #include <cstdint>
 #include <memory>

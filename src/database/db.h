@@ -37,9 +37,9 @@
 
 #pragma once
 
-#include "../core/structs.h"
-#include "../logger/logger.h"
-#include "../processors/logging/log_event.h"
+#include "src/core/structs.h"
+#include "src/logger/logger.h"
+#include "src/processors/logging/log_event.h"
 #include <cstdint>
 #include <immintrin.h> // For m256i
 #include <memory>

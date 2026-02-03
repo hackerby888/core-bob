@@ -15,9 +15,9 @@
 #include <fcntl.h>
 #include <arpa/inet.h>
 
-#include "../connection/connection.h"
-#include "../logger/logger.h"
-#include "../shim.h"
+#include "src/connection/connection.h"
+#include "src/logger/logger.h"
+#include "src/shim.h"
 
 // Forward declaration from IOProcessor.cpp
 void connReceiver(QCPtr conn, const bool isTrustedNode);

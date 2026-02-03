@@ -1,5 +1,5 @@
 #pragma once
-#include "../shim.h"
+#include "src/shim.h"
 #include "common_def.h"
 static char spectrumLock;
 struct EntityRecord
