@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y \
     libhiredis-dev \
     zlib1g-dev \
     libjsoncpp-dev \
+    libc-ares-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -36,6 +37,7 @@ RUN apt-get update && apt-get install -y \
     libsnappy1v5 \
     libhiredis1.1.0 \
     libjsoncpp25 \
+    libcares2 \
     ca-certificates \
     wget \
     unzip \
