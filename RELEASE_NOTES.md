@@ -7,6 +7,14 @@ behavior.
 
 For exact commit boundaries, see `git log v<a>..v<b>`.
 ---
+## 1.5.18
+- Bad-peer avoidance for discovered peers: a peer that answers under half of bob's log
+  requests within 30s, for two 30s samples in a row, is rotated out and its IP excluded from
+  discovery for 30 min. Static `p2p_node` peers are never flagged. If most peers look bad at
+  once it is treated as a local network problem and nothing is banned.
+- Peer discovery sends `exclude=<banned + connected IPs>` to the first `peer_discovery_urls`
+  entry only; fallback URLs get the plain request.
+
 ## 1.5.17
 - New config key `allow_peer_discovery` (bool) controls DNS peer discovery/rotation.
   Absent: `true` when `p2p_node` is empty, `false` otherwise (unchanged behavior).

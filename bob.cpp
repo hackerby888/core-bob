@@ -660,7 +660,7 @@ int runBob(int argc, char *argv[])
             std::vector<RequestResponseHeader> tokens(wake_count);
             for (auto& t : tokens) {
                 t.randomizeDejavu();
-                t.setType(35); // NOP
+                t.setType(END_RESPONSE); // NOP
                 t.setSize(8);
             }
             for (size_t i = 0; i < wake_count; ++i) {

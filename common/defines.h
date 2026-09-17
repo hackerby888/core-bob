@@ -28,6 +28,8 @@
 #define REQUEST_COMPUTOR_LIST 11
 #define RESPOND_COMPUTOR_LIST 2
 #define BROADCAST_TICK_VOTE 3
+#define END_RESPONSE 35 // also used as NOP
+#define TRY_AGAIN 54    // core request queue full, resend later
 
 #define SC_INITIALIZE_TX (NUMBER_OF_TRANSACTIONS_PER_TICK + 0)
 #define SC_BEGIN_EPOCH_TX (NUMBER_OF_TRANSACTIONS_PER_TICK + 1)

@@ -1,5 +1,7 @@
 #include "connection.h"
 #include <mutex>
+#include <unordered_map>
+#include <algorithm>
 
 #include "shim.h"
 #include "spdlogDriver/Logger.h"
@@ -191,16 +193,25 @@ int ConnectionPool::sendWithPasscodeToRandom(uint8_t* buffer, int passcodeOffset
     std::lock_guard<std::mutex> lock(mutex_);
     if (conns_.empty()) return -1;
 
-    // Build an index list of currently valid connections
+    // Build an index list of currently valid connections, peers flagged bad kept aside
     std::vector<std::size_t> idx;
+    std::vector<std::size_t> idxBad;
     idx.reserve(conns_.size());
     for (std::size_t i = 0; i < conns_.size(); ++i) {
-        if (conns_[i] && conns_[i]->isSocketValid()) {
-            if (nodeType == NODE_TYPE_ANY) idx.push_back(i);
-            if (nodeType == NODE_TYPE_BM && conns_[i]->isBM()) idx.push_back(i);
-            if (nodeType == NODE_TYPE_BOB && conns_[i]->isBob()) idx.push_back(i);
+        if (!conns_[i] || !conns_[i]->isSocketValid()) continue;
+        bool typeMatches = false;
+        if (nodeType == NODE_TYPE_ANY) typeMatches = true;
+        if (nodeType == NODE_TYPE_BM && conns_[i]->isBM()) typeMatches = true;
+        if (nodeType == NODE_TYPE_BOB && conns_[i]->isBob()) typeMatches = true;
+        if (!typeMatches) continue;
+        if (conns_[i]->isBad()) {
+            idxBad.push_back(i);
+        } else {
+            idx.push_back(i);
         }
     }
+    // every peer of this type is flagged: a bad peer still beats no peer
+    if (idx.empty()) idx = idxBad;
     if (idx.empty()) return -1;
     std::uniform_int_distribution<std::size_t> dist(0, idx.size() - 1);
     auto chosen = idx[dist(rng_)];
@@ -267,12 +278,39 @@ void peerWatchdog(ConnectionPool& conns_, bool allowDnsReplace)
 {
     // No useful incoming data for 300s -> force reconnect.
     constexpr uint64_t IDLE_DISCONNECT_S = 300;
+    // Bad-peer detection: under half of the log requests answered promptly for STRIKES_TO_FLAG
+    // samples in a row -> rotate the peer out and ban its IP for BAN_TTL_S.
+    constexpr int STRIKES_TO_FLAG = 2;
+    constexpr uint64_t BAN_TTL_S = 1800;
+    constexpr size_t MAX_BANNED_PEERS = 64; // backend caps the exclude list at 64 as well
     std::chrono::seconds checkPeriodIdleDisconnect = std::chrono::seconds(30);
     std::chrono::seconds checkPeriodPeerRefresh = std::chrono::seconds(180); // 3 minutes
     std::chrono::seconds checkPeriodLastTick = std::chrono::seconds(60); // 1 min
+    std::chrono::seconds checkPeriodSample = std::chrono::seconds(30);
+    std::chrono::seconds badRotateBackoff = std::chrono::seconds(30); // min gap between forced rotations
     auto lastCheckIdleDisconnect = std::chrono::high_resolution_clock::now();
     auto lastCheckPeerRefresh = std::chrono::high_resolution_clock::now();
     auto lastCheckLastTick = std::chrono::high_resolution_clock::now();
+    auto lastCheckSample = std::chrono::high_resolution_clock::now();
+    auto lastBadForce = std::chrono::high_resolution_clock::now() - badRotateBackoff;
+
+    // Sample baseline per peer; connection objects live for the whole process.
+    struct PeerSample
+    {
+        uint64_t sent = 0;
+        uint64_t answered = 0;
+        int strikes = 0;
+    };
+    std::unordered_map<QubicConnection*, PeerSample> samples;
+    // ip -> unix time the ban expires. Only this thread touches it.
+    std::unordered_map<std::string, uint64_t> bannedUntil;
+    auto eraseSoonestExpiringBan = [&bannedUntil]() {
+        auto soonest = std::min_element(bannedUntil.begin(), bannedUntil.end(), [](const auto& a, const auto& b) { return a.second < b.second; });
+        std::string ip = soonest->first;
+        bannedUntil.erase(soonest);
+        return ip;
+    };
+
     while (!gStopFlag.load(std::memory_order_relaxed)) {
         auto now = std::chrono::high_resolution_clock::now();
         if (now - lastCheckIdleDisconnect >= checkPeriodIdleDisconnect) {
@@ -293,19 +331,92 @@ void peerWatchdog(ConnectionPool& conns_, bool allowDnsReplace)
                 }
             }
         }
+        if (now - lastCheckSample >= checkPeriodSample) {
+            lastCheckSample = now;
+            int N = conns_.size();
+            int rotatableCount = 0;
+            int badCount = 0;
+            for (int i = 0; i < N; i++) {
+                QCPtr qc;
+                if (!conns_.get(i, qc) || !qc) continue;
+                if (qc->isStatic()) continue; // config peers are never judged
+                rotatableCount++;
+                PeerSample& sample = samples[qc.get()];
+                uint64_t sentTotal = qc->getLogReqSent();
+                uint64_t answeredTotal = qc->getLogReqAnswered();
+                uint64_t sentInSample = sentTotal - sample.sent;
+                uint64_t answeredInSample = answeredTotal - sample.answered;
+                sample.sent = sentTotal;
+                sample.answered = answeredTotal;
+                if (sentInSample < MIN_SENT_PER_SAMPLE) {
+                    // too little traffic to judge, keep strikes as they are
+                } else if (isBadSample(sentInSample, answeredInSample)) {
+                    sample.strikes++;
+                    if (sample.strikes >= STRIKES_TO_FLAG && !qc->isBad()) {
+                        qc->markBad();
+                        Logger::get()->warn("Peer {}:{} flagged bad: answered {}/{} log requests within {}s, {} bad samples of {}s in a row",
+                                            qc->getNodeIp(), qc->getNodePort(), answeredInSample, sentInSample,
+                                            PROMPT_RESPONSE_S, sample.strikes, checkPeriodSample.count());
+                    }
+                } else {
+                    sample.strikes = 0;
+                }
+                if (qc->isBad()) badCount++;
+            }
+            // most peers unresponsive at the same time = our own network, not theirs
+            if (badCount >= 2 && badCount * 2 >= rotatableCount) {
+                for (int i = 0; i < N; i++) {
+                    QCPtr qc;
+                    if (!conns_.get(i, qc) || !qc) continue;
+                    qc->clearBad();
+                    samples[qc.get()].strikes = 0;
+                }
+                Logger::get()->warn("{} of {} peers unresponsive at once; treating as local network problem, not banning",
+                                    badCount, rotatableCount);
+                badCount = 0;
+            }
+            if (badCount > 0 && allowDnsReplace && now - lastBadForce >= badRotateBackoff) {
+                // run the DNS-replace block right away instead of waiting for its timer
+                lastBadForce = now;
+                lastCheckPeerRefresh = now - checkPeriodPeerRefresh;
+            }
+        }
         if (allowDnsReplace && now - lastCheckPeerRefresh >= checkPeriodPeerRefresh) {
             lastCheckPeerRefresh = now;
             uint64_t nowTimestamp = std::time(nullptr);
+            for (auto it = bannedUntil.begin(); it != bannedUntil.end();) {
+                if (it->second <= nowTimestamp) {
+                    it = bannedUntil.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+            // backend must return neither a banned peer nor one we already hold
+            std::vector<std::string> exclude;
+            for (const auto& ban : bannedUntil) {
+                exclude.push_back(ban.first);
+            }
+            int N = conns_.size();
+            for (int i = 0; i < N; i++) {
+                QCPtr qc;
+                if (!conns_.get(i, qc) || !qc) continue;
+                std::string connectedIp = qc->getNodeIp();
+                if (!connectedIp.empty()) exclude.push_back(connectedIp);
+            }
             uint64_t oldest = std::numeric_limits<uint64_t>::max();
             QCPtr worst = nullptr;
             std::vector<QCPtr> rotatable; // non-static peers eligible for replacement
-            int N = conns_.size();
             for (int i = 0; i < N; i++) {
                 QCPtr qc;
                 if (conns_.get(i,qc)) {
                     if (qc) {
                         if (qc->isStatic()) continue;
                         rotatable.push_back(qc);
+                        // flagged peer always goes first
+                        if (qc->isBad()) {
+                            worst = qc;
+                            break;
+                        }
                         if (!qc->isSocketValid()) {
                             worst = qc;
                             break;
@@ -332,26 +443,42 @@ void peerWatchdog(ConnectionPool& conns_, bool allowDnsReplace)
                 std::vector<std::string> newPeer;
                 std::string mode = "random";
                 if (worst->isBM()) {
-                    newPeer = GetPeerFromDNS(1, 0, mode);
+                    newPeer = GetPeerFromDNS(1, 0, mode, exclude);
                 } else {
-                    newPeer = GetPeerFromDNS(0, 1, mode);
+                    newPeer = GetPeerFromDNS(0, 1, mode, exclude);
                 }
                 ParsedEndpoint parsed;
-                if (!newPeer.empty() && parseEndpoint(newPeer[0], parsed)) {
-                    if (!conns_.checkExistIp(parsed.ip)) {
-                        Logger::get()->info("Replaced peer {}:{} with {}:{}", worst->getNodeIp(), worst->getNodePort(),
-                                                                             parsed.ip, parsed.port);
-                        worst->replacePeer(parsed.ip, parsed.port);
-                        worst->setNodeType(parsed.nodeType);
-                        if (parsed.has_passcode) {
-                            worst->updatePasscode(parsed.passcode_arr);
+                // fallback discovery ignores exclude, so re-check on our side
+                bool usable = !newPeer.empty() && parseEndpoint(newPeer[0], parsed)
+                              && !conns_.checkExistIp(parsed.ip) && bannedUntil.count(parsed.ip) == 0;
+                if (usable) {
+                    std::string oldIp = worst->getNodeIp();
+                    if (worst->isBad()) {
+                        bannedUntil[oldIp] = nowTimestamp + BAN_TTL_S;
+                        Logger::get()->info("Banned peer {} for {}s", oldIp, BAN_TTL_S);
+                        if (bannedUntil.size() > MAX_BANNED_PEERS) {
+                            eraseSoonestExpiringBan();
                         }
-                        worst->disconnect(); // this will be auto reconnect in the IO loop
                     }
-                    else {
-                        lastCheckPeerRefresh = now - checkPeriodPeerRefresh - std::chrono::seconds(1); // trigger the refresh again
-                        continue;
+                    Logger::get()->info("Replaced peer {}:{} with {}:{}", oldIp, worst->getNodePort(),
+                                                                         parsed.ip, parsed.port);
+                    worst->replacePeer(parsed.ip, parsed.port);
+                    worst->setNodeType(parsed.nodeType);
+                    if (parsed.has_passcode) {
+                        worst->updatePasscode(parsed.passcode_arr);
                     }
+                    worst->disconnect(); // this will be auto reconnect in the IO loop
+                    // new peer starts with a clean sample
+                    PeerSample& sample = samples[worst.get()];
+                    sample.sent = worst->getLogReqSent();
+                    sample.answered = worst->getLogReqAnswered();
+                    sample.strikes = 0;
+                }
+                else if (!bannedUntil.empty()) {
+                    // nothing usable came back: release the ban closest to expiry instead of retrying
+                    // in a loop; next try is the next forced or regular refresh
+                    std::string releasedIp = eraseSoonestExpiringBan();
+                    Logger::get()->info("peer discovery exhausted; released ban on {}", releasedIp);
                 }
             }
         }

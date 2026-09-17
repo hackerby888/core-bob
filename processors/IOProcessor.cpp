@@ -384,6 +384,19 @@ void replyCurrentTickInfo(QCPtr& conn, uint32_t dejavu)
     conn->enqueueSend((uint8_t *) &pl, sizeof(pl));
 }
 
+// Bad-peer detection: credit the peer when a response matches one of its pending log requests
+// and that request is still young. Returns the request age in seconds, -1 = no pending entry.
+static long long countLogAnswer(QCPtr& conn, uint32_t dejavu)
+{
+    uint8_t requestType = 0;
+    long long requestAgeSec = requestMapperFrom.updateConn(dejavu, conn, requestType);
+    if (requestAgeSec >= 0 && requestAgeSec < PROMPT_RESPONSE_S && isLogRequestType(requestType))
+    {
+        conn->incLogReqAnswered();
+    }
+    return requestAgeSec;
+}
+
 // Receiver thread: continuously receives full packets and enqueues them into the global round buffer (MRB).
 void connReceiver(QCPtr conn, const bool isTrustedNode)
 {
@@ -422,6 +435,11 @@ void connReceiver(QCPtr conn, const bool isTrustedNode)
                 }
             }
             // trusted conn allowed all packets
+            // EndResponse/TryAgain = peer alive but has no data (yet): counts as answered, nothing to enqueue
+            if (hdr.type() == END_RESPONSE || hdr.type() == TRY_AGAIN)
+            {
+                countLogAnswer(conn, hdr.getDejavu());
+            }
             if (isDataType(hdr.type()))
             {
                 conn->trackLastActivity(); // track it when this peer sends something meaningful
@@ -441,7 +459,8 @@ void connReceiver(QCPtr conn, const bool isTrustedNode)
                     // bytes. requestMapperFrom was seeded with this dejavu
                     // when we sent the request out with conn=nullptr; we
                     // patch it in here now that we know.
-                    if (!requestMapperFrom.updateConn(hdr.getDejavu(), conn)
+                    long long requestAgeSec = countLogAnswer(conn, hdr.getDejavu());
+                    if (requestAgeSec < 0
                         && (hdr.type() == LogRangesPerTxInTick::type() || hdr.type() == RespondLog::type())) {
                         Logger::get()->warn("{} response from {}:{} (dejavu {}) has no pending request; peer answered too slowly",
                                             hdr.type() == RespondLog::type() ? "Log event" : "Log range",

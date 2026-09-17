@@ -12,6 +12,27 @@
 #define NODE_TYPE_ANY 0
 #define NODE_TYPE_BOB 1
 #define NODE_TYPE_BM 2
+
+// Bad-peer detection. A log response counts as answered only if its request is younger than this.
+static constexpr long long PROMPT_RESPONSE_S = 30;
+// A watchdog sample with fewer log requests than this gives no verdict.
+static constexpr uint64_t MIN_SENT_PER_SAMPLE = 20;
+
+// Only these two are 1 request = 1 response, so their sent/answered ratio is meaningful.
+inline bool isLogRequestType(uint8_t type)
+{
+    return type == RequestLog::type() || type == RequestAllLogIdRangesFromTick::type();
+}
+
+// Bad sample = under half of the log requests answered promptly.
+inline bool isBadSample(uint64_t sentInSample, uint64_t answeredInSample)
+{
+    if (sentInSample < MIN_SENT_PER_SAMPLE)
+    {
+        return false;
+    }
+    return answeredInSample * 2 < sentInSample;
+}
 struct ParsedEndpoint
 {
     std::string endpoint;
@@ -64,6 +85,7 @@ public:
         if (n > sizeof(mNodeIp) - 1) n = sizeof(mNodeIp) - 1;
         memcpy(mNodeIp, ip.c_str(), n);
         mNodePort = port;
+        clearBad(); // new address, new chance
     }
     void askForLatestTick();
     void updateLatestTick(uint32_t tick);
@@ -86,8 +108,21 @@ public:
     void incLogsDelivered() { mLogsDelivered.fetch_add(1, std::memory_order_relaxed); }
     uint64_t getLogsDelivered() const { return mLogsDelivered.load(std::memory_order_relaxed); }
 
+    // Bad-peer detection counters, cumulative; peerWatchdog samples the deltas.
+    void incLogReqSent() { mLogReqSent.fetch_add(1, std::memory_order_relaxed); }
+    void incLogReqAnswered() { mLogReqAnswered.fetch_add(1, std::memory_order_relaxed); }
+    uint64_t getLogReqSent() const { return mLogReqSent.load(std::memory_order_relaxed); }
+    uint64_t getLogReqAnswered() const { return mLogReqAnswered.load(std::memory_order_relaxed); }
+    // Set by peerWatchdog; log requests avoid this peer until it is rotated out.
+    bool isBad() const { return mBad.load(std::memory_order_relaxed); }
+    void markBad() { mBad.store(true, std::memory_order_relaxed); }
+    void clearBad() { mBad.store(false, std::memory_order_relaxed); }
+
 private:
     std::atomic<uint64_t> mLogsDelivered{0};
+    std::atomic<uint64_t> mLogReqSent{0};
+    std::atomic<uint64_t> mLogReqAnswered{0};
+    std::atomic<bool> mBad{false};
     std::atomic<uint64_t> lastActivityTimestamp;
     char mNodeIp[32];
     int mNodePort;
@@ -173,7 +208,8 @@ void parseConnection(ConnectionPool& connPoolAll,
                      std::vector<std::string>& endpoints);
 void doHandshakeAndGetBootstrapInfo(ConnectionPool& cp, bool isTrusted, uint32_t& maxInitTick, uint16_t& maxInitEpoch);
 void getComputorList(ConnectionPool& cp, std::string arbitratorIdentity);
-std::vector<std::string> GetPeerFromDNS(const int nLite, const int nBob, const std::string mode);
+// exclude: IPs the primary discovery backend must not return (banned + already connected).
+std::vector<std::string> GetPeerFromDNS(const int nLite, const int nBob, const std::string mode, const std::vector<std::string>& exclude = {});
 bool DownloadStateFiles(uint16_t epoch);
 void GetLatestTickFromExternalSources(uint32_t& tick, uint16_t& epoch);
 void CheckInQubicGlobal();

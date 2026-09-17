@@ -83,7 +83,8 @@ struct AppConfig {
     // private/sealed network) or extend the failover chain.
 
     // Peer-discovery endpoints: each is queried with /random-peers until
-    // one returns a usable list of peers.
+    // one returns a usable list of peers. Only the qubic.global one receives the
+    // exclude= list (banned + connected peers); fallbacks may not support it.
     std::vector<std::string> peer_discovery_urls = {
         "https://api.qubic.global",
         "https://api.qubic.li/public",
