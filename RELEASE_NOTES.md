@@ -7,6 +7,9 @@ behavior.
 
 For exact commit boundaries, see `git log v<a>..v<b>`.
 ---
+## 1.5.18
+- Fix bob silently stops serving P2P requests (port 21842) while still looking synced. Usually appear after several epochs with seamless transition.
+
 ## 1.5.17
 - New config key `allow_peer_discovery` (bool) controls DNS peer discovery/rotation.
   Absent: `true` when `p2p_node` is empty, `false` otherwise (unchanged behavior).
