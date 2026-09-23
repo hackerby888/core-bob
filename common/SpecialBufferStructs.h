@@ -46,9 +46,10 @@ public:
      *
      * This function is thread-safe. It will wait until enough space is available in the buffer.
      * @param ptr A pointer to the raw data of the packet. The packet must start with a valid RequestResponseHeader.
-     * @return True if the packet was successfully enqueued, false if the packet is invalid (e.g., larger than buffer capacity).
+     * @param timeoutMs Max wait for space in milliseconds; 0 waits forever.
+     * @return True if the packet was successfully enqueued, false if the packet is invalid (e.g., larger than buffer capacity) or the wait timed out.
      */
-    bool EnqueuePacket(const uint8_t* ptr) {
+    bool EnqueuePacket(const uint8_t* ptr, uint32_t timeoutMs = 0) {
         if (!ptr) {
             return false;
         }
@@ -66,9 +67,14 @@ public:
 
         // Wait until there is enough space for the entire packet.
         // A loop is necessary to handle spurious wakeups.
-        cv_not_full_.wait(lock, [this, packet_size] {
+        auto hasSpace = [this, packet_size] {
             return stop_ || (capacity_ - size_ >= packet_size);
-        });
+        };
+        if (timeoutMs == 0) {
+            cv_not_full_.wait(lock, hasSpace);
+        } else if (!cv_not_full_.wait_for(lock, std::chrono::milliseconds(timeoutMs), hasSpace)) {
+            return false;
+        }
         if (stop_) {
             return false;
         }

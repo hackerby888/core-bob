@@ -264,7 +264,12 @@ int QubicConnection::enqueueSend(uint8_t* buffer, int sz)
             }
         }
     }
-    mBuffer->EnqueuePacket(buffer);
+    // Bounded wait: a peer that never drains must not block callers forever.
+    if (!mBuffer->EnqueuePacket(buffer, SEND_ENQUEUE_TIMEOUT_MS))
+    {
+        if (!mReconnectable) disconnect();
+        return -1;
+    }
     return sz;
 }
 
@@ -409,6 +414,8 @@ void QubicConnection::disconnect()
         shutdown(fd, SHUT_RDWR);
         close(fd);
     }
+    // Incoming socket never comes back; release producers parked on the send buffer.
+    if (!mReconnectable) mBuffer->notifyStop();
 }
 
 void QubicConnection::trackLastActivity()

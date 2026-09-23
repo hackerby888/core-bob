@@ -563,6 +563,7 @@ void RequestProcessorThread()
         QCPtr conn;
         requestMapperTo.get(header.getDejavu(), ignore, conn);
         if (conn == nullptr) continue;
+        if (!conn->isSocketValid()) continue; // requester is gone, nobody to reply to
         switch (type)
         {
             case RequestedQuorumTick::type: // TickVote

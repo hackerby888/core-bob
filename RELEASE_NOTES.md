@@ -7,13 +7,16 @@ behavior.
 
 For exact commit boundaries, see `git log v<a>..v<b>`.
 ---
-## 1.5.18
+## 1.5.19
 - Bad-peer avoidance for discovered peers: a peer that answers under half of bob's log
   requests within 30s, for two 30s samples in a row, is rotated out and its IP excluded from
   discovery for 30 min. Static `p2p_node` peers are never flagged. If most peers look bad at
   once it is treated as a local network problem and nothing is banned.
 - Peer discovery sends `exclude=<banned + connected IPs>` to the first `peer_discovery_urls`
   entry only; fallback URLs get the plain request.
+
+## 1.5.18
+- Fix bob silently stops serving P2P requests (port 21842) while still looking synced. Usually appear after several epochs with seamless transition.
 
 ## 1.5.17
 - New config key `allow_peer_discovery` (bool) controls DNS peer discovery/rotation.

@@ -12,6 +12,7 @@
 #define NODE_TYPE_ANY 0
 #define NODE_TYPE_BOB 1
 #define NODE_TYPE_BM 2
+#define SEND_ENQUEUE_TIMEOUT_MS 5000
 
 // Bad-peer detection. A log response counts as answered only if its request is younger than this.
 static constexpr long long PROMPT_RESPONSE_S = 30;
