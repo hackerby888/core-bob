@@ -385,7 +385,7 @@ int runBob(int argc, char *argv[])
     // swapped behind their back.
     std::thread peerWatchdogThread;
     if (!gIsTestnet) {
-        peerWatchdogThread = std::thread(peerWatchdog, std::ref(connPool), needPeerWatchdog);
+        peerWatchdogThread = std::thread(peerWatchdog, std::ref(connPool), needPeerWatchdog, cfg.autoban);
     }
     {
         // update last seen network tick

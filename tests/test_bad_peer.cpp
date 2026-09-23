@@ -8,9 +8,9 @@
 
 TEST(BadPeer, BadSampleNeedsEnoughTraffic)
 {
-    EXPECT_FALSE(isBadSample(19, 0));  // too few requests, no verdict
-    EXPECT_FALSE(isBadSample(20, 10)); // exactly half answered is still fine
-    EXPECT_TRUE(isBadSample(20, 9));
+    EXPECT_FALSE(isBadSample(14, 0)); // too few requests, no verdict
+    EXPECT_FALSE(isBadSample(16, 8)); // exactly half answered is still fine
+    EXPECT_TRUE(isBadSample(16, 7));
     EXPECT_FALSE(isBadSample(100, 97));
     EXPECT_TRUE(isBadSample(100, 0));
 }
@@ -18,9 +18,18 @@ TEST(BadPeer, BadSampleNeedsEnoughTraffic)
 TEST(BadPeer, LogRequestTypesOnly)
 {
     EXPECT_TRUE(isLogRequestType(RequestLog::type()));
-    EXPECT_TRUE(isLogRequestType(RequestAllLogIdRangesFromTick::type()));
+    EXPECT_FALSE(isLogRequestType(RequestAllLogIdRangesFromTick::type())); // healthy bobs END future ticks
     EXPECT_FALSE(isLogRequestType(RequestedQuorumTick::type));
     EXPECT_FALSE(isLogRequestType(END_RESPONSE));
+}
+
+TEST(BadPeer, ServedLogAnswerNeedsPayload)
+{
+    const size_t headerSize = sizeof(RequestResponseHeader);
+    EXPECT_TRUE(isServedLogAnswer(RespondLog::type(), headerSize + 1));
+    EXPECT_FALSE(isServedLogAnswer(RespondLog::type(), headerSize)); // empty RespondLog = no logs
+    EXPECT_FALSE(isServedLogAnswer(END_RESPONSE, headerSize));
+    EXPECT_FALSE(isServedLogAnswer(LogRangesPerTxInTick::type(), headerSize + 100));
 }
 
 TEST(BadPeer, FlagClearedOnReplace)
@@ -31,11 +40,13 @@ TEST(BadPeer, FlagClearedOnReplace)
         QubicConnection conn("127.0.0.1", 1);
         EXPECT_FALSE(conn.isBad());
 
-        conn.markBad();
+        conn.markBad(BadPeerKind::Unresponsive);
         EXPECT_TRUE(conn.isBad());
+        EXPECT_EQ(conn.getBadKind(), BadPeerKind::Unresponsive);
 
         conn.replacePeer("1.2.3.4", 1);
         EXPECT_FALSE(conn.isBad());
+        EXPECT_EQ(conn.getBadKind(), BadPeerKind::None);
         EXPECT_STREQ(conn.getNodeIp(), "1.2.3.4");
     }
     // release the "bob" logger so later fixtures can init it again

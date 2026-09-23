@@ -40,7 +40,8 @@ static std::pair<std::string, std::string> splitOriginAndPath(const std::string&
 static std::vector<std::string> tryPeerDiscovery(const std::string& baseUrl,
                                                  const int nLite, const int nBob,
                                                  const std::string& mode,
-                                                 const std::vector<std::string>& exclude)
+                                                 const std::vector<std::string>& exclude,
+                                                 bool& answered)
 {
     std::vector<std::string> results;
     if (baseUrl.empty()) return results;
@@ -68,6 +69,7 @@ static std::vector<std::string> tryPeerDiscovery(const std::string& baseUrl,
 
         auto jsonPtr = response->getJsonObject();
         if (!jsonPtr) return results;
+        answered = true; // valid reply, even if the list is empty
 
         if (jsonPtr->isMember("bobPeers") && (*jsonPtr)["bobPeers"].isArray()) {
             for (const auto& peer : (*jsonPtr)["bobPeers"]) {
@@ -89,7 +91,8 @@ static std::vector<std::string> tryPeerDiscovery(const std::string& baseUrl,
     return results;
 }
 
-std::vector<std::string> GetPeerFromDNS(const int nLite, const int nBob, const std::string mode, const std::vector<std::string>& exclude)
+std::vector<std::string> GetPeerFromDNS(const int nLite, const int nBob, const std::string mode, const std::vector<std::string>& exclude,
+                                        bool* primaryExhausted)
 {
     // Walk the configured peer-discovery URLs in order and return the first
     // non-empty response. This is intentional failover, not aggregation —
@@ -97,8 +100,12 @@ std::vector<std::string> GetPeerFromDNS(const int nLite, const int nBob, const s
     // Only the first (primary) backend understands exclude; fallbacks get the plain request.
     static const std::vector<std::string> noExclude;
     bool isPrimary = true;
+    if (primaryExhausted) *primaryExhausted = false;
     for (const auto& baseUrl : gPeerDiscoveryUrls) {
-        auto peers = tryPeerDiscovery(baseUrl, nLite, nBob, mode, isPrimary ? exclude : noExclude);
+        bool answered = false;
+        auto peers = tryPeerDiscovery(baseUrl, nLite, nBob, mode, isPrimary ? exclude : noExclude, answered);
+        // primary answered but had nothing outside our exclude list = every peer it knows is banned or held
+        if (isPrimary && primaryExhausted) *primaryExhausted = answered && peers.empty() && !exclude.empty();
         isPrimary = false;
         if (!peers.empty()) {
             Logger::get()->debug("peer-discovery: got {} peers from {}", peers.size(), baseUrl);
