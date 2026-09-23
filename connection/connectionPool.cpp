@@ -306,6 +306,7 @@ void peerWatchdog(ConnectionPool& conns_, bool allowDnsReplace, bool autoban)
         uint64_t refused = 0;
         uint64_t noData = 0;
         int strikes = 0;
+        bool silent = false; // static peers only: last windows bad and mostly silence (never flagged, only evidence)
     };
     auto resetSample = [](PeerSample& sample, QubicConnection& qc) {
         sample.sent = qc.getLogReqSent();
@@ -347,15 +348,17 @@ void peerWatchdog(ConnectionPool& conns_, bool allowDnsReplace, bool autoban)
         if (autoban && now - lastCheckSample >= checkPeriodSample) {
             lastCheckSample = now;
             int N = conns_.size();
-            int rotatableCount = 0;
+            int outgoingCount = 0; // all outgoing peers incl. static, for the local-network guard
             int badCount = 0;
             int unresponsiveCount = 0;
             for (int i = 0; i < N; i++) {
                 QCPtr qc;
                 if (!conns_.get(i, qc) || !qc) continue;
-                // config peers are never judged; incoming clients can't be rotated and get freed (pointer reuse in samples)
-                if (qc->isStatic() || !qc->isReconnectable()) continue;
-                rotatableCount++;
+                // incoming clients can't be rotated and get freed (pointer reuse in samples)
+                if (!qc->isReconnectable()) continue;
+                // static peers are judged the same way but never flagged: their verdict only tells us if our link is fine
+                bool isStaticPeer = qc->isStatic();
+                outgoingCount++;
                 // refresh the peer's tick each sample so its ahead/behind flag is at most 30s old
                 if (qc->isSocketValid()) qc->askForLatestTick();
                 PeerSample& sample = samples[qc.get()];
@@ -383,37 +386,54 @@ void peerWatchdog(ConnectionPool& conns_, bool allowDnsReplace, bool autoban)
                 }
                 if (peerWasBehind) {
                     sample.strikes = 0;
+                    sample.silent = false;
                 } else if (!windowClosed) {
                     // not enough traffic yet, keep accumulating into this window
                 } else if (isBadSample(sentInSample, answeredInSample)) {
                     sample.strikes++;
-                    if (sample.strikes >= STRIKES_TO_FLAG && !qc->isBad()) {
+                    if (sample.strikes >= STRIKES_TO_FLAG) {
                         // mostly END/empty = has no logs for us, otherwise it is not answering
                         BadPeerKind kind = (refusedInSample * 2 >= sentInSample) ? BadPeerKind::NoLogs : BadPeerKind::Unresponsive;
-                        qc->markBad(kind);
-                        Logger::get()->warn("Peer {}:{} flagged {}: answered {}/{} log requests within {}s ({} refused), {} bad windows in a row",
-                                            qc->getNodeIp(), qc->getNodePort(), kind == BadPeerKind::NoLogs ? "no-logs" : "unresponsive",
-                                            answeredInSample, sentInSample, PROMPT_RESPONSE_S, refusedInSample, sample.strikes);
+                        if (isStaticPeer) {
+                            sample.silent = kind == BadPeerKind::Unresponsive;
+                        } else if (!qc->isBad()) {
+                            qc->markBad(kind);
+                            Logger::get()->warn("Peer {}:{} flagged {}: answered {}/{} log requests within {}s ({} refused), {} bad windows in a row",
+                                                qc->getNodeIp(), qc->getNodePort(), kind == BadPeerKind::NoLogs ? "no-logs" : "unresponsive",
+                                                answeredInSample, sentInSample, PROMPT_RESPONSE_S, refusedInSample, sample.strikes);
+                        }
                     }
                 } else {
                     sample.strikes = 0;
+                    sample.silent = false;
                 }
+                // dead socket gets no traffic, its window never closes: says nothing about our link
+                if (!qc->isSocketValid()) sample.silent = false;
                 if (qc->isBad()) badCount++;
-                if (qc->getBadKind() == BadPeerKind::Unresponsive) unresponsiveCount++;
+                bool silent = isStaticPeer ? sample.silent : qc->getBadKind() == BadPeerKind::Unresponsive;
+                if (silent) unresponsiveCount++;
             }
-            // most peers silent at the same time = our own network, not theirs.
+            // most peers silent at the same time (static ones included) = our own network, not theirs.
             // no-logs peers answered us (END/empty), so they prove the link works and keep their flag.
-            if (unresponsiveCount >= 2 && unresponsiveCount * 2 >= rotatableCount) {
+            if (unresponsiveCount >= 2 && unresponsiveCount * 2 >= outgoingCount) {
+                int clearedCount = 0;
                 for (int i = 0; i < N; i++) {
                     QCPtr qc;
-                    if (!conns_.get(i, qc) || !qc) continue;
+                    if (!conns_.get(i, qc) || !qc || !qc->isReconnectable()) continue;
+                    PeerSample& sample = samples[qc.get()];
+                    if (qc->isStatic()) {
+                        if (sample.silent) sample.strikes = 0;
+                        sample.silent = false;
+                        continue;
+                    }
                     if (qc->getBadKind() != BadPeerKind::Unresponsive) continue;
                     qc->clearBad();
-                    samples[qc.get()].strikes = 0;
+                    sample.strikes = 0;
+                    clearedCount++;
                 }
                 Logger::get()->warn("{} of {} peers unresponsive at once; treating as local network problem, not banning",
-                                    unresponsiveCount, rotatableCount);
-                badCount -= unresponsiveCount;
+                                    unresponsiveCount, outgoingCount);
+                badCount -= clearedCount;
             }
             if (badCount > 0 && allowDnsReplace && now - lastBadForce >= badRotateBackoff) {
                 // run the DNS-replace block right away instead of waiting for its timer
