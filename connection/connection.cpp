@@ -345,7 +345,8 @@ void QubicConnection::askForLatestTick() {
 void QubicConnection::updateLatestTick(uint32_t tick)
 {
     mLatestTick = tick;
-    mWasAheadOfUs.store(tick > (gCurrentFetchingLogTick + 32), std::memory_order_relaxed);
+    // ahead = past every tick we may ask for: current log tick + prefetch window, plus 16 ticks slack
+    mWasAheadOfUs.store(tick > (gCurrentFetchingLogTick + 16 + gFutureOffset), std::memory_order_relaxed);
 }
 
 void QubicConnection::getBootstrapTickInfo(uint32_t& tick, uint16_t& epoch)
