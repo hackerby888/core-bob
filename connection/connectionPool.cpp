@@ -289,7 +289,8 @@ void peerWatchdog(ConnectionPool& conns_, bool allowDnsReplace, bool autoban)
     constexpr size_t MAX_BANNED_PEERS = 58;
     std::chrono::seconds checkPeriodIdleDisconnect = std::chrono::seconds(30);
     std::chrono::seconds checkPeriodPeerRefresh = std::chrono::seconds(180); // 3 minutes
-    std::chrono::seconds checkPeriodLastTick = std::chrono::seconds(60); // 1 min
+    // keep-alive + fresh peer tick for the ahead/behind flag (network moves 3-5 ticks/s)
+    std::chrono::seconds checkPeriodLastTick = std::chrono::seconds(1);
     std::chrono::seconds checkPeriodSample = std::chrono::seconds(30);
     std::chrono::seconds badRotateBackoff = std::chrono::seconds(30); // min gap between forced rotations
     auto lastCheckIdleDisconnect = std::chrono::high_resolution_clock::now();
@@ -359,8 +360,6 @@ void peerWatchdog(ConnectionPool& conns_, bool allowDnsReplace, bool autoban)
                 // static peers are judged the same way but never flagged: their verdict only tells us if our link is fine
                 bool isStaticPeer = qc->isStatic();
                 outgoingCount++;
-                // refresh the peer's tick each sample so its ahead/behind flag is at most 30s old
-                if (qc->isSocketValid()) qc->askForLatestTick();
                 PeerSample& sample = samples[qc.get()];
                 uint64_t sentTotal = qc->getLogReqSent();
                 uint64_t answeredTotal = qc->getLogReqAnswered();
