@@ -121,7 +121,7 @@ If you want to use a different configuration file, you can specify its path when
 - **Default value:** `false`
 
 **`autoban`**
-- **What it does:** Rotates out a discovered peer that fails most of bob's log requests (two 30s samples in a row) and keeps its IP out of discovery: 10 min if it answers but has no logs, 4 h if it does not answer at all. Static `p2p-node` peers are never judged. Only matters with peer discovery on.
+- **What it does:** Rotates out a discovered peer that fails most of bob's log requests (two bad windows in a row) and keeps its IP out of discovery: 10 min if it answers but has no logs, 12 h if it does not answer at all. Static `p2p-node` peers are never judged. Only matters with peer discovery on.
 - **Default value:** `false`
 
 ### Advanced Settings

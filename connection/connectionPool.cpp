@@ -284,7 +284,7 @@ void peerWatchdog(ConnectionPool& conns_, bool allowDnsReplace, bool autoban)
     // Peer that answers but has no logs for us: cheap and honest, short cooldown.
     constexpr uint64_t NO_LOG_TTL_S = 600;
     // Peer that does not answer at all: each request wastes a 30s pending entry, long ban.
-    constexpr uint64_t BAN_TTL_S = 14400;
+    constexpr uint64_t BAN_TTL_S = 43200; // 12 h
     // backend caps the exclude list at 64; leave room for our 6 connected IPs so they are never cut off
     constexpr size_t MAX_BANNED_PEERS = 58;
     std::chrono::seconds checkPeriodIdleDisconnect = std::chrono::seconds(30);
